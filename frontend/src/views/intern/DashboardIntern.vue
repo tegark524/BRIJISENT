@@ -73,25 +73,33 @@ const loadModels = async () => {
 const prosesRegistrasiWajah = async () => {
   if (!videoElementReg.value) return;
   
-  isScanning.value = true; // Nyalakan animasi laser
+  isScanning.value = true;
 
-  // TRIK UX: Beri jeda 100ms agar browser sempat me-render animasi dan SweetAlert
-  // SEBELUM JavaScript membeku karena proses Face API
-  Swal.fire({ title: 'Menganalisis Wajah...', html: 'Mohon diam sejenak...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-  await new Promise(resolve => setTimeout(resolve, 100)); 
+  // 1. Tampilkan Loading Global
+  Swal.fire({ 
+    title: 'Menganalisis Wajah...', 
+    html: 'Mohon diam sejenak, sistem sedang mengunci biometrik Anda...', 
+    allowOutsideClick: false, 
+    didOpen: () => Swal.showLoading() 
+  });
 
   try {
-    // Deteksi dengan settingan input size yang lebih kecil agar lebih ringan (default 416, kita ubah 224 atau 320)
     const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 });
+    
+    // 2. Deteksi wajah selagi video masih aktif di DOM
     const detection = await faceapi.detectSingleFace(videoElementReg.value, options).withFaceLandmarks().withFaceDescriptor();
 
+    // 3. TUTUP KAMERA & MODAL SEGERA setelah deteksi (Berhasil/Gagal)
+    if (streamSaatIni) streamSaatIni.getTracks().forEach(track => track.stop());
+    showRegistrationModal.value = false;
+    isScanning.value = false;
+
     if (!detection) {
-      isScanning.value = false;
-      return Swal.fire('Gagal Deteksi', 'Wajah tidak terdeteksi. Pastikan cahaya terang.', 'warning');
+      // Lempar error agar ditangkap oleh blok catch di bawah
+      throw new Error('Wajah tidak terdeteksi. Pastikan wajah terlihat jelas dan cahaya cukup.');
     }
 
-    Swal.fire({ title: 'Menyimpan Data...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-    
+    // 4. Proses simpan ke server (UI masih menampilkan loading global)
     const faceDescriptorArray = Array.from(detection.descriptor);
     await axios.post('/face-register', { 
       user_id: user.value.id, 
@@ -99,58 +107,65 @@ const prosesRegistrasiWajah = async () => {
     });
     
     Swal.fire('Berhasil!', 'Wajah berhasil didaftarkan. Selamat datang di BRIJISENT!', 'success');
-    
-    isScanning.value = false;
-    authStore.user.face_descriptor = JSON.stringify(faceDescriptorArray); // Update state lokal
-    if (streamSaatIni) streamSaatIni.getTracks().forEach(track => track.stop());
-    showRegistrationModal.value = false;
+    authStore.user.face_descriptor = JSON.stringify(faceDescriptorArray);
     await fetchTodayData();
     
   } catch (error) {
-    isScanning.value = false;
-    Swal.fire('Gagal', 'Terjadi kesalahan saat menyimpan wajah ke server.', 'error');
+    // 5. JIKA GAGAL: Tampilkan pesan error dan BALIKKAN ke kamera
+    const pesan = error.response?.data?.message || error.message || 'Gagal menyimpan data ke server.';
+    await Swal.fire('Registrasi Gagal', pesan, 'error');
+    
+    // Buka kembali modal dan inisialisasi ulang kamera
+    showRegistrationModal.value = true;
+    await nextTick();
+    await initKameraReg();
   }
 };
-
 // 3. OPTIMASI ABSENSI
 const prosesAbsenDariKamera = async () => {
   if (!videoElement.value) return;
 
   isScanning.value = true;
 
-  // TRIK UX: Jeda rendering UI
-  Swal.fire({ title: 'Memindai Biometrik...', html: 'Tahan posisi...', allowOutsideClick: false, didOpen: () => { Swal.showLoading() } });
-  await new Promise(resolve => setTimeout(resolve, 100));
+  Swal.fire({ 
+    title: 'Memindai Biometrik...', 
+    html: 'Tahan posisi, sedang memverifikasi identitas...', 
+    allowOutsideClick: false, 
+    didOpen: () => Swal.showLoading() 
+  });
 
   try {
     const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 });
     const detection = await faceapi.detectSingleFace(videoElement.value, options).withFaceLandmarks().withFaceDescriptor();
 
+    // LANGSUNG TUTUP KAMERA setelah deteksi
+    tutupKamera(); 
+    isScanning.value = false;
+
     if (!detection) {
-      isScanning.value = false;
-      tutupKamera();
-      return Swal.fire('Gagal Deteksi', 'Wajah tidak terdeteksi. Pastikan pencahayaan cukup.', 'warning');
+      throw new Error('Wajah tidak terdeteksi. Pastikan pencahayaan cukup.');
     }
 
-    Swal.fire({ title: 'Verifikasi Server...', allowOutsideClick: false, didOpen: () => { Swal.showLoading() } });
-
+    // Gunakan rute relatif (tanpa localhost:8000)
+    const endpoint = jenisAbsen.value === 'masuk' ? '/attendances/clock-in' : '/attendances/clock-out';
     const faceDescriptorArray = Array.from(detection.descriptor);
-    tutupKamera(); 
-
-    const endpoint = jenisAbsen.value === 'masuk' ? '/api/attendances/clock-in' : '/api/attendances/clock-out';
-    const payload = { user_id: user.value.id, face_descriptor: faceDescriptorArray };
-
-    await axios.post(`http://127.0.0.1:8000${endpoint}`, payload);
     
-    isScanning.value = false;
+    await axios.post(endpoint, { 
+        user_id: user.value.id, 
+        face_descriptor: faceDescriptorArray 
+    });
+    
     Swal.fire('Berhasil', `Absen ${jenisAbsen.value} sukses!`, 'success');
     await fetchTodayData();
     
   } catch (error) {
-    isScanning.value = false;
-    tutupKamera();
-    const pesanError = error.response?.data?.message || error.response?.data?.error || 'Terjadi kesalahan sistem.';
-    Swal.fire('Gagal Verifikasi', pesanError, 'error');
+    const pesanError = error.response?.data?.message || error.message || 'Terjadi kesalahan sistem.';
+    await Swal.fire('Gagal Verifikasi', pesanError, 'error');
+    
+    // BALIKKAN KE KAMERA jika gagal
+    showCameraModal.value = true;
+    await nextTick();
+    await initKamera();
   }
 };
 
