@@ -113,7 +113,7 @@ const requestOTP = async () => {
       didOpen: () => Swal.showLoading() 
     })
     
-    await axios.post('http://127.0.0.1:8000/api/send-otp-email', { 
+    await axios.post('/send-otp-email', { 
       email: resetForm.value.email 
     })
     
@@ -159,7 +159,7 @@ const submitReset = async () => {
   isResetLoading.value = true
 
   try {
-    await axios.post('http://127.0.0.1:8000/api/reset-password', {
+    await axios.post('/reset-password', {
       email: resetForm.value.email,
       otp: resetForm.value.otp,
       new_password: resetForm.value.new_password
