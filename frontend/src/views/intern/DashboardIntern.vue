@@ -106,8 +106,18 @@ const prosesRegistrasiWajah = async () => {
       face_descriptor: faceDescriptorArray 
     });
     
-    Swal.fire('Berhasil!', 'Wajah berhasil didaftarkan. Selamat datang di BRIJISENT!', 'success');
+    // UPDATE STATE DAN LOCALSTORAGE AGAR TIDAK MINTA REGRIS LAGI SETELAH REFRESH
     authStore.user.face_descriptor = JSON.stringify(faceDescriptorArray);
+    authStore.user.is_active = true; // Set jadi aktif
+    
+    // Simpan kembali objek user yang utuh ke localStorage
+    localStorage.setItem('user', JSON.stringify(authStore.user));
+    
+    Swal.fire('Berhasil!', 'Wajah berhasil didaftarkan. Selamat datang!', 'success');
+    
+    isScanning.value = false;
+    if (streamSaatIni) streamSaatIni.getTracks().forEach(track => track.stop());
+    showRegistrationModal.value = false;
     await fetchTodayData();
     
   } catch (error) {
@@ -433,8 +443,12 @@ const unduhLaporan = () => {
 // PERBAIKAN: Mengecek is_active setiap kali user dimuat
 watch(() => user.value.id, async (newId) => { 
   if (newId) { 
-    // Jika is_active = 0 (atau false), paksa buka modal registrasi
-    if (user.value.is_active === 0 || user.value.is_active === false) {
+    // Cek apakah face_descriptor kosong ATAU is_active masih 0/false
+    const needsRegistration = !authStore.user.face_descriptor || 
+                               authStore.user.is_active === 0 || 
+                               authStore.user.is_active === false;
+
+    if (needsRegistration) {
       showRegistrationModal.value = true;
       await nextTick();
       await initKameraReg();
@@ -443,15 +457,6 @@ watch(() => user.value.id, async (newId) => {
     }
   } 
 }, { immediate: true });
-
-watch(activeMenu, (newMenu) => { if (newMenu === 'history_absen' || newMenu === 'history_logbook') fetchHistory(); });
-
-onMounted(() => {
-  loadModels() 
-  handleResize()
-  window.addEventListener('resize', handleResize)
-  timer = setInterval(updateTime, 1000)
-})
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
