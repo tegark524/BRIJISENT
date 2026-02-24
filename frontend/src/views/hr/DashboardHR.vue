@@ -51,28 +51,28 @@ const updateTime = () => { currentClock.value = new Date() }
 // --- FETCH DATA ---
 const fetchData = async () => {
   try {
-    const resSum = await axios.get('/api/hr/dashboard-summary')
+    const resSum = await axios.get('/hr/dashboard-summary')
     summary.value = resSum.data.summary || { total_interns: 0, present_today: 0 }
     
     // Tarik data Realtime & Cek Libur
-    const resRealtime = await axios.get('/api/hr/realtime-status')
+    const resRealtime = await axios.get('/hr/realtime-status')
     realtimeInterns.value = resRealtime.data.data || []
     isTodayHoliday.value = resRealtime.data.is_holiday || false
     if (isTodayHoliday.value) {
       holidayInfo.value = { title: resRealtime.data.holiday_title, desc: resRealtime.data.holiday_desc }
     }
 
-    const resIntern = await axios.get('/api/users/intern')
+    const resIntern = await axios.get('/users/intern')
     interns.value = resIntern.data.data || []
 
-    const resHR = await axios.get('/api/users/hr')
+    const resHR = await axios.get('/users/hr')
     hrList.value = resHR.data.data || []
     
     // Tarik Semua History
-    const resHistory = await axios.get('/api/hr/all-history')
+    const resHistory = await axios.get('/hr/all-history')
     allHistoryData.value = resHistory.data.data || []
     
-    const resSettings = await axios.get('/api/hr/settings')
+    const resSettings = await axios.get('/hr/settings')
     if (resSettings.data.settings) attendanceSettings.value = resSettings.data.settings
     holidays.value = resSettings.data.holidays || []
   } catch (e) {
@@ -110,7 +110,7 @@ const formatHistoryOfficeStatus = (statusStr) => {
 // --- LOGIKA SETTINGS & KALENDER ---
 const saveSettings = async () => {
   try {
-    await axios.post('/api/hr/settings', attendanceSettings.value)
+    await axios.post('/hr/settings', attendanceSettings.value)
     Swal.fire('Berhasil', 'Pengaturan jam kerja disimpan!', 'success')
   } catch (e) {
     Swal.fire('Gagal', 'Gagal menyimpan pengaturan', 'error')
@@ -120,7 +120,7 @@ const saveSettings = async () => {
 const addHoliday = async () => {
   if (!newHoliday.value.date || !newHoliday.value.desc) return Swal.fire('Perhatian', 'Tanggal dan keterangan libur wajib diisi!', 'warning')
   try {
-    await axios.post('/api/hr/holidays', newHoliday.value)
+    await axios.post('/hr/holidays', newHoliday.value)
     Swal.fire('Berhasil', 'Hari libur ditambahkan!', 'success')
     newHoliday.value = { date: '', desc: '' }
     fetchData()
@@ -131,7 +131,7 @@ const addHoliday = async () => {
 
 const deleteHoliday = async (id) => {
   try {
-    await axios.delete(`/api/hr/holidays/${id}`)
+    await axios.delete(`/hr/holidays/${id}`)
     fetchData()
   } catch (e) {
     Swal.fire('Gagal', 'Gagal menghapus hari libur', 'error')
@@ -191,8 +191,8 @@ const openModal = (user = null) => {
 const handleSave = async () => {
   const currentRole = activeTab.value === 'manage-intern' ? 'intern' : 'hr';
   try {
-    if (isEditMode.value) await axios.put(`/api/users/${form.value.id}`, form.value);
-    else await axios.post(`/api/users`, { ...form.value, role: currentRole });
+    if (isEditMode.value) await axios.put(`/users/${form.value.id}`, form.value);
+    else await axios.post(`/users`, { ...form.value, role: currentRole });
     Swal.fire('Berhasil', 'Data disimpan!', 'success');
     showModal.value = false; fetchData();
   } catch (e) { Swal.fire('Gagal', e.response?.data?.message || 'Periksa kembali data Anda', 'error'); }
@@ -201,7 +201,7 @@ const handleSave = async () => {
 const confirmDelete = (id) => {
   Swal.fire({ title: 'Hapus User?', icon: 'warning', showCancelButton: true, confirmButtonColor: '#d33' })
   .then(async (result) => {
-    if (result.isConfirmed) { await axios.delete(`/api/users/${id}`); fetchData(); Swal.fire('Deleted', 'Data dihapus', 'success'); }
+    if (result.isConfirmed) { await axios.delete(`/users/${id}`); fetchData(); Swal.fire('Deleted', 'Data dihapus', 'success'); }
   })
 }
 
