@@ -38,28 +38,58 @@ const updateTime = () => { currentTime.value = new Date() }
 // STATE KAMERA & IZIN
 // ==========================================
 const showCameraModal = ref(false)
-const showRegistrationModal = ref(false) // State Baru untuk Registrasi Wajah
-const isScanning = ref(false) // State untuk memicu animasi scanner
+const showRegistrationModal = ref(false)
+const isScanning = ref(false)
 const jenisAbsen = ref('') 
 const listKamera = ref([])
 const kameraTerpilih = ref(null)
 const videoElement = ref(null)
-const videoElementReg = ref(null) // Video Khusus Registrasi
+const videoElementReg = ref(null)
 let streamSaatIni = null
 
 const showIzinModal = ref(false)
 const formIzin = ref({ tanggal: '', alasan: '', bukti: null })
 
 // ==========================================
+// HELPER: VALIDASI FACE DESCRIPTOR
+// ==========================================
+/**
+ * Mengecek apakah face_descriptor valid dan sudah terisi.
+ * Menangani semua edge case: null, undefined, string "null", array kosong, dll.
+ */
+const hasFaceDescriptor = (userData) => {
+  const fd = userData?.face_descriptor
+
+  // Cek semua kemungkinan nilai "kosong"
+  if (fd === null || fd === undefined) return false
+  if (fd === 'null') return false       // String "null" dari JSON.stringify(null)
+  if (fd === '') return false           // String kosong
+  if (fd === '[]') return false         // Array kosong dalam bentuk string
+
+  // Jika berupa string JSON, parse dan validasi isinya
+  if (typeof fd === 'string') {
+    try {
+      const parsed = JSON.parse(fd)
+      return Array.isArray(parsed) && parsed.length > 0
+    } catch {
+      return false
+    }
+  }
+
+  // Jika sudah berupa array langsung (tanpa JSON.stringify)
+  if (Array.isArray(fd)) return fd.length > 0
+
+  return false
+}
+
+// ==========================================
 // FUNGSI KAMERA & VERIFIKASI WAJAH
 // ==========================================
-// 1. OPTIMASI LOAD MODEL: Paksa pakai GPU (WebGL)
+
 const loadModels = async () => {
   try {
-    // Pastikan pakai WebGL biar diproses oleh VGA/GPU bawaan HP/Laptop
-    await faceapi.tf.setBackend('webgl'); 
-    await faceapi.tf.ready();
-
+    await faceapi.tf.setBackend('webgl')
+    await faceapi.tf.ready()
     await faceapi.nets.tinyFaceDetector.loadFromUri('/models')
     await faceapi.nets.faceLandmark68Net.loadFromUri('/models')
     await faceapi.nets.faceRecognitionNet.loadFromUri('/models')
@@ -69,117 +99,113 @@ const loadModels = async () => {
   }
 }
 
-// 2. OPTIMASI REGISTRASI WAJAH
+// REGISTRASI WAJAH
 const prosesRegistrasiWajah = async () => {
-  if (!videoElementReg.value) return;
-  
-  isScanning.value = true;
+  if (!videoElementReg.value) return
 
-  // 1. Tampilkan Loading Global
+  isScanning.value = true
+
   Swal.fire({ 
     title: 'Menganalisis Wajah...', 
     html: 'Mohon diam sejenak, sistem sedang mengunci biometrik Anda...', 
     allowOutsideClick: false, 
     didOpen: () => Swal.showLoading() 
-  });
+  })
 
   try {
-    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 });
-    
-    // 2. Deteksi wajah selagi video masih aktif di DOM
-    const detection = await faceapi.detectSingleFace(videoElementReg.value, options).withFaceLandmarks().withFaceDescriptor();
+    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 })
+    const detection = await faceapi
+      .detectSingleFace(videoElementReg.value, options)
+      .withFaceLandmarks()
+      .withFaceDescriptor()
 
-    // 3. TUTUP KAMERA & MODAL SEGERA setelah deteksi (Berhasil/Gagal)
-    if (streamSaatIni) streamSaatIni.getTracks().forEach(track => track.stop());
-    showRegistrationModal.value = false;
-    isScanning.value = false;
+    // Tutup kamera & modal segera setelah deteksi
+    if (streamSaatIni) streamSaatIni.getTracks().forEach(track => track.stop())
+    showRegistrationModal.value = false
+    isScanning.value = false
 
     if (!detection) {
-      // Lempar error agar ditangkap oleh blok catch di bawah
-      throw new Error('Wajah tidak terdeteksi. Pastikan wajah terlihat jelas dan cahaya cukup.');
+      throw new Error('Wajah tidak terdeteksi. Pastikan wajah terlihat jelas dan cahaya cukup.')
     }
 
-    // 4. Proses simpan ke server (UI masih menampilkan loading global)
-    const faceDescriptorArray = Array.from(detection.descriptor);
+    const faceDescriptorArray = Array.from(detection.descriptor)
+
     await axios.post('/face-register', { 
       user_id: user.value.id, 
       face_descriptor: faceDescriptorArray 
-    });
+    })
     
-    // UPDATE STATE DAN LOCALSTORAGE AGAR TIDAK MINTA REGRIS LAGI SETELAH REFRESH
-    authStore.user.face_descriptor = JSON.stringify(faceDescriptorArray);
-    authStore.user.is_active = true; // Set jadi aktif
+    // Update store & localStorage agar tidak minta registrasi ulang setelah refresh
+    authStore.user.face_descriptor = JSON.stringify(faceDescriptorArray)
+    authStore.user.is_active = true
+    localStorage.setItem('user', JSON.stringify(authStore.user))
     
-    // Simpan kembali objek user yang utuh ke localStorage
-    localStorage.setItem('user', JSON.stringify(authStore.user));
-    
-    Swal.fire('Berhasil!', 'Wajah berhasil didaftarkan. Selamat datang!', 'success');
-    
-    isScanning.value = false;
-    if (streamSaatIni) streamSaatIni.getTracks().forEach(track => track.stop());
-    showRegistrationModal.value = false;
-    await fetchTodayData();
+    Swal.fire('Berhasil!', 'Wajah berhasil didaftarkan. Selamat datang!', 'success')
+    await fetchTodayData()
     
   } catch (error) {
-    // 5. JIKA GAGAL: Tampilkan pesan error dan BALIKKAN ke kamera
-    const pesan = error.response?.data?.message || error.message || 'Gagal menyimpan data ke server.';
-    await Swal.fire('Registrasi Gagal', pesan, 'error');
+    isScanning.value = false
+    const pesan = error.response?.data?.message || error.message || 'Gagal menyimpan data ke server.'
+    await Swal.fire('Registrasi Gagal', pesan, 'error')
     
-    // Buka kembali modal dan inisialisasi ulang kamera
-    showRegistrationModal.value = true;
-    await nextTick();
-    await initKameraReg();
+    // Buka kembali modal dan inisialisasi ulang kamera jika gagal
+    showRegistrationModal.value = true
+    await nextTick()
+    await initKameraReg()
   }
-};
-// 3. OPTIMASI ABSENSI
-const prosesAbsenDariKamera = async () => {
-  if (!videoElement.value) return;
+}
 
-  isScanning.value = true;
+// ABSENSI
+const prosesAbsenDariKamera = async () => {
+  if (!videoElement.value) return
+
+  isScanning.value = true
 
   Swal.fire({ 
     title: 'Memindai Biometrik...', 
     html: 'Tahan posisi, sedang memverifikasi identitas...', 
     allowOutsideClick: false, 
     didOpen: () => Swal.showLoading() 
-  });
+  })
 
   try {
-    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 });
-    const detection = await faceapi.detectSingleFace(videoElement.value, options).withFaceLandmarks().withFaceDescriptor();
+    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 })
+    const detection = await faceapi
+      .detectSingleFace(videoElement.value, options)
+      .withFaceLandmarks()
+      .withFaceDescriptor()
 
-    // LANGSUNG TUTUP KAMERA setelah deteksi
-    tutupKamera(); 
-    isScanning.value = false;
+    tutupKamera()
+    isScanning.value = false
 
     if (!detection) {
-      throw new Error('Wajah tidak terdeteksi. Pastikan pencahayaan cukup.');
+      throw new Error('Wajah tidak terdeteksi. Pastikan pencahayaan cukup.')
     }
 
-    // Gunakan rute relatif (tanpa localhost:8000)
-    const endpoint = jenisAbsen.value === 'masuk' ? '/attendances/clock-in' : '/attendances/clock-out';
-    const faceDescriptorArray = Array.from(detection.descriptor);
+    const endpoint = jenisAbsen.value === 'masuk' ? '/attendances/clock-in' : '/attendances/clock-out'
+    const faceDescriptorArray = Array.from(detection.descriptor)
     
     await axios.post(endpoint, { 
-        user_id: user.value.id, 
-        face_descriptor: faceDescriptorArray 
-    });
+      user_id: user.value.id, 
+      face_descriptor: faceDescriptorArray 
+    })
     
-    Swal.fire('Berhasil', `Absen ${jenisAbsen.value} sukses!`, 'success');
-    await fetchTodayData();
+    Swal.fire('Berhasil', `Absen ${jenisAbsen.value} sukses!`, 'success')
+    await fetchTodayData()
     
   } catch (error) {
-    const pesanError = error.response?.data?.message || error.message || 'Terjadi kesalahan sistem.';
-    await Swal.fire('Gagal Verifikasi', pesanError, 'error');
+    isScanning.value = false
+    const pesanError = error.response?.data?.message || error.message || 'Terjadi kesalahan sistem.'
+    await Swal.fire('Gagal Verifikasi', pesanError, 'error')
     
-    // BALIKKAN KE KAMERA jika gagal
-    showCameraModal.value = true;
-    await nextTick();
-    await initKamera();
+    // Kembali ke kamera jika gagal
+    showCameraModal.value = true
+    await nextTick()
+    await initKamera()
   }
-};
+}
 
-// --- LOGIKA REGISTRASI WAJAH (INTERN BARU) ---
+// --- LOGIKA KAMERA REGISTRASI ---
 const initKameraReg = async () => {
   try {
     await navigator.mediaDevices.getUserMedia({ video: true })
@@ -203,10 +229,7 @@ const mulaiStreamReg = async () => {
   } catch (error) { console.error(error) }
 }
 
-
-
-
-// --- LOGIKA ABSENSI (SEHARI-HARI) ---
+// --- LOGIKA KAMERA ABSENSI ---
 const bukaKamera = async (jenis) => {
   jenisAbsen.value = jenis
   showCameraModal.value = true
@@ -245,13 +268,9 @@ const tutupKamera = () => {
   showCameraModal.value = false
 }
 
-
 // ==========================================
 // FUNGSI IZIN & STATUS
 // ==========================================
-// 1. Ganti 'null' jadi string kosong ''
-
-// 2. Timpa fungsi submit izin
 const submitIzinForm = async () => {
   if (!formIzin.value.alasan || !formIzin.value.tanggal) {
     return Swal.fire('Peringatan', 'Tanggal dan alasan izin wajib diisi!', 'warning')
@@ -259,167 +278,158 @@ const submitIzinForm = async () => {
   
   Swal.fire({ title: 'Mengirim...', allowOutsideClick: false, didOpen: () => Swal.showLoading() })
   try {
-    // NGIRIM JSON BIASA (JAUH LEBIH RINGAN DARI FORMDATA)
     const payload = {
       user_id: user.value.id,
       tanggal: formIzin.value.tanggal,
       alasan: formIzin.value.alasan,
-      bukti: formIzin.value.bukti // Ini sekarang isinya murni URL string
-    };
+      bukti: formIzin.value.bukti
+    }
 
-    await axios.post('/attendances/permit', payload);
+    await axios.post('/attendances/permit', payload)
     
     Swal.fire('Terkirim', 'Izin berhasil diajukan ke HR', 'success')
     showIzinModal.value = false
-    formIzin.value = { tanggal: '', alasan: '', bukti: '' } // Reset form
+    formIzin.value = { tanggal: '', alasan: '', bukti: '' }
     fetchTodayData()
   } catch (e) {
     Swal.fire('Gagal', e.response?.data?.message || 'Terjadi kesalahan sistem', 'error')
   }
 }
 
-const toggleStatus= async () => {
+const toggleStatus = async () => {
   try {
-    const res = await axios.post('/attendances/toggle-status', { user_id: user.value.id });
+    const res = await axios.post('/attendances/toggle-status', { user_id: user.value.id })
     if (res.data.success) {
-      await fetchTodayData(); 
-      Swal.fire('Berhasil', res.data.message, 'success');
+      await fetchTodayData()
+      Swal.fire('Berhasil', res.data.message, 'success')
     }
   } catch (e) {
-    Swal.fire('Gagal', 'Gagal mengubah status', 'error');
+    Swal.fire('Gagal', 'Gagal mengubah status', 'error')
   }
-};
+}
 
 // ==========================================
 // COMPUTED LOGIC (UI STATE)
 // ==========================================
 const fetchTodayData = async () => {
-  if (!user.value?.id) return;
+  if (!user.value?.id) return
   try {
-    const res = await axios.get(`/attendances/today/${user.value.id}`);
-    todayAttendance.value = res.data.attendance || null;
-    logbookText.value = res.data.attendance?.logbook || '';
-    isWeekend.value = res.data.is_weekend;
-    currentHoliday.value = res.data.holiday;
+    const res = await axios.get(`/attendances/today/${user.value.id}`)
+    todayAttendance.value = res.data.attendance || null
+    logbookText.value = res.data.attendance?.logbook || ''
+    isWeekend.value = res.data.is_weekend
+    currentHoliday.value = res.data.holiday
   } catch (e) {
-    console.error("Gagal refresh data:", e);
+    console.error("Gagal refresh data:", e)
   }
-};
+}
 
 const attendanceStatus = computed(() => {
-  if (!todayAttendance.value) return 'BELUM ABSEN';
-  
-  // PERBAIKAN: Gunakan pengecekan status === 'permit'
-  if (todayAttendance.value.status === 'permit') return 'IZIN TIDAK MASUK';
-  
-  if (todayAttendance.value.clock_out) return 'SUDAH PULANG';
-  if (todayAttendance.value.office_status === 'keluar_sementara') return 'SEDANG KELUAR';
-  if (todayAttendance.value.clock_in) return 'DI KANTOR';
-  
-  return 'BELUM ABSEN';
-});
+  if (!todayAttendance.value) return 'BELUM ABSEN'
+  if (todayAttendance.value.status === 'permit') return 'IZIN TIDAK MASUK'
+  if (todayAttendance.value.clock_out) return 'SUDAH PULANG'
+  if (todayAttendance.value.office_status === 'keluar_sementara') return 'SEDANG KELUAR'
+  if (todayAttendance.value.clock_in) return 'DI KANTOR'
+  return 'BELUM ABSEN'
+})
 
 const statusBadgeStyle = computed(() => {
   switch(attendanceStatus.value) {
-    case 'DI KANTOR': return 'background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); color: #065f46; border: 1px solid #34d399; box-shadow: 0 4px 10px rgba(52, 211, 153, 0.2);';
-    case 'SEDANG KELUAR': return 'background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); color: #92400e; border: 1px solid #fbbf24; box-shadow: 0 4px 10px rgba(251, 191, 36, 0.2);';
-    case 'SUDAH PULANG': return 'background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); color: #1e40af; border: 1px solid #93c5fd; box-shadow: 0 4px 10px rgba(147, 197, 253, 0.2);';
-    default: return 'background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%); color: #475569; border: 1px solid #cbd5e1;';
+    case 'DI KANTOR': return 'background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); color: #065f46; border: 1px solid #34d399; box-shadow: 0 4px 10px rgba(52, 211, 153, 0.2);'
+    case 'SEDANG KELUAR': return 'background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); color: #92400e; border: 1px solid #fbbf24; box-shadow: 0 4px 10px rgba(251, 191, 36, 0.2);'
+    case 'SUDAH PULANG': return 'background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); color: #1e40af; border: 1px solid #93c5fd; box-shadow: 0 4px 10px rgba(147, 197, 253, 0.2);'
+    default: return 'background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%); color: #475569; border: 1px solid #cbd5e1;'
   }
-});
+})
 
 const greetingMessage = computed(() => {
   if (currentHoliday.value) {
-    return { title: 'Hari ini libur 🎉', subtitle: `Selamat berlibur dalam rangka ${currentHoliday.value.description}, nikmati waktu istirahatmu!`, type: 'holiday' };
+    return { title: 'Hari ini libur 🎉', subtitle: `Selamat berlibur dalam rangka ${currentHoliday.value.description}, nikmati waktu istirahatmu!`, type: 'holiday' }
   }
   
   if (isWeekend.value && !todayAttendance.value) {
-    return { title: 'Akhir Pekan Telah Tiba! 🏖️', subtitle: 'Saatnya recharge energi. Sampai jumpa di hari kerja berikutnya!', type: 'holiday' };
+    return { title: 'Akhir Pekan Telah Tiba! 🏖️', subtitle: 'Saatnya recharge energi. Sampai jumpa di hari kerja berikutnya!', type: 'holiday' }
   }
 
-  // PERBAIKAN: Gunakan pengecekan status === 'permit'
   if (todayAttendance.value?.status === 'permit') {
-    // Ambil alasan dari kolom permit_reason JIKA ADA, kalau tidak ada ambil dari logbook
-    const alasan = todayAttendance.value.permit_reason || todayAttendance.value.logbook || 'Keperluan tertentu';
-    
+    const alasan = todayAttendance.value.permit_reason || todayAttendance.value.logbook || 'Keperluan tertentu'
     return { 
       title: 'Status: Sedang Izin 📝', 
       subtitle: `Kamu tercatat izin hari ini karena: "${alasan}". Semoga urusanmu lancar!`, 
       type: 'izin' 
-    };
+    }
   }
 
   if (todayAttendance.value?.clock_out) {
-    return { title: 'Sudah Check-out 🏡', subtitle: 'Selamat pulang, hati-hati di jalan dan selamat beristirahat!', type: 'pulang' };
+    return { title: 'Sudah Check-out 🏡', subtitle: 'Selamat pulang, hati-hati di jalan dan selamat beristirahat!', type: 'pulang' }
   }
   
-  return null;
-});
+  return null
+})
 
-const canClockIn = computed(() => attendanceStatus.value === 'BELUM ABSEN');
-const canClockOut = computed(() => attendanceStatus.value === 'DI KANTOR');
-const canToggleKeluar = computed(() => attendanceStatus.value === 'DI KANTOR' || attendanceStatus.value === 'SEDANG KELUAR');
+const canClockIn = computed(() => attendanceStatus.value === 'BELUM ABSEN')
+const canClockOut = computed(() => attendanceStatus.value === 'DI KANTOR')
+const canToggleKeluar = computed(() => attendanceStatus.value === 'DI KANTOR' || attendanceStatus.value === 'SEDANG KELUAR')
 
 // ==========================================
 // FUNGSI LOGBOOK & RIWAYAT
 // ==========================================
 const simpanLogbook = async () => {
-  // Cegah simpan kalau statusnya izin
   if (todayAttendance.value?.status === 'permit') {
-    return Swal.fire('Info', 'Kamu sedang izin hari ini, tidak perlu mengisi logbook!', 'info');
+    return Swal.fire('Info', 'Kamu sedang izin hari ini, tidak perlu mengisi logbook!', 'info')
   }
 
-  if (!logbookText.value.trim()) return Swal.fire('Opps', 'Isi dulu kegiatannya, Gar!', 'warning');
+  if (!logbookText.value.trim()) return Swal.fire('Opps', 'Isi dulu kegiatannya!', 'warning')
   
   try {
-    const res = await axios.post('/attendances/logbook', { user_id: user.value.id, logbook: logbookText.value });
+    const res = await axios.post('/attendances/logbook', { user_id: user.value.id, logbook: logbookText.value })
     if (res.data.success) {
-      Swal.fire({ icon: 'success', title: 'Tersimpan!', text: 'Laporan kerja BRIJISENT kamu sudah aman.', timer: 2000 });
-      await fetchTodayData();
+      Swal.fire({ icon: 'success', title: 'Tersimpan!', text: 'Laporan kerja BRIJISENT kamu sudah aman.', timer: 2000 })
+      await fetchTodayData()
     }
   } catch (e) {
-    Swal.fire('Gagal', e.response?.data?.message || 'Gagal menyimpan logbook.', 'error');
+    Swal.fire('Gagal', e.response?.data?.message || 'Gagal menyimpan logbook.', 'error')
   }
-};
+}
 
 const fetchHistory = async () => {
-  if (!user.value?.id) return;
+  if (!user.value?.id) return
   try {
-    const res = await axios.get(`/attendances/history/${user.value.id}`);
-    historyAbsen.value = res.data.data; 
-  } catch (e) { console.error("Gagal memuat riwayat:", e); }
-};
+    const res = await axios.get(`/attendances/history/${user.value.id}`)
+    historyAbsen.value = res.data.data
+  } catch (e) { console.error("Gagal memuat riwayat:", e) }
+}
 
 const formatTgl = (tgl) => {
-  if (!tgl) return '-';
-  return new Date(tgl).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
-};
+  if (!tgl) return '-'
+  return new Date(tgl).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
+}
 
 const labelStatus = (s) => {
-  const map = { 'present': 'Masuk', 'permit': 'Izin', 'absent': 'Alpa' };
-  return map[s] || 'Masuk';
-};
+  const map = { 'present': 'Masuk', 'permit': 'Izin', 'absent': 'Alpa' }
+  return map[s] || 'Masuk'
+}
 
 const statusClass = (s) => {
-  if (s === 'permit') return 'bg-warning-light';
-  if (s === 'absent') return 'bg-danger-light';
-  return 'bg-success-light';
-};
+  if (s === 'permit') return 'bg-warning-light'
+  if (s === 'absent') return 'bg-danger-light'
+  return 'bg-success-light'
+}
 
 const bukaEditLogbook = async (data) => {
   const { value: text } = await Swal.fire({
     title: 'Edit Logbook', input: 'textarea', inputLabel: `Tanggal: ${formatTgl(data.date)}`,
     inputValue: data.logbook || '', showCancelButton: true, confirmButtonColor: '#00529C', confirmButtonText: 'Simpan Perubahan'
-  });
+  })
 
   if (text !== undefined) {
     try {
-      await axios.post('/attendances/logbook', { user_id: user.value.id, logbook: text, date: data.date });
-      Swal.fire('Tersimpan', 'Logbook berhasil diperbarui', 'success');
-      fetchHistory(); 
-    } catch (e) { Swal.fire('Gagal', 'Gagal memperbarui logbook', 'error'); }
+      await axios.post('/attendances/logbook', { user_id: user.value.id, logbook: text, date: data.date })
+      Swal.fire('Tersimpan', 'Logbook berhasil diperbarui', 'success')
+      fetchHistory()
+    } catch (e) { Swal.fire('Gagal', 'Gagal memperbarui logbook', 'error') }
   }
-};
+}
 
 const switchMenu = (menu) => {
   activeMenu.value = menu
@@ -433,50 +443,64 @@ const handleResize = () => {
 }
 
 const unduhLaporan = () => {
-  window.open(`/attendances/download/${user.value.id}`, '_blank');
-};
+  window.open(`/attendances/download/${user.value.id}`, '_blank')
+}
 
 // ==========================================
 // LIFECYCLE HOOKS & WATCHERS
 // ==========================================
 
-// PERBAIKAN: Mengecek is_active setiap kali user dimuat
-watch(() => user.value.id, async (newId) => { 
-  if (newId) { 
-    // Cek apakah face_descriptor kosong ATAU is_active masih 0/false
-    const needsRegistration = !authStore.user.face_descriptor || 
-                               authStore.user.is_active === 0 || 
-                               authStore.user.is_active === false;
+/**
+ * PERBAIKAN UTAMA:
+ * Hanya ada SATU watcher tunggal di sini.
+ * Watcher duplikat yang lama menjadi sumber bug dan sudah dihapus.
+ * 
+ * Alur:
+ * 1. Coba fetch data user terbaru dari server untuk sinkronisasi.
+ * 2. Gunakan hasFaceDescriptor() untuk validasi yang robust.
+ * 3. Jika belum punya wajah → tampilkan modal registrasi.
+ * 4. Jika sudah punya wajah → langsung fetch data absensi hari ini.
+ */
+watch(() => user.value.id, async (newId) => {
+  if (!newId) return
 
-    if (needsRegistration) {
-      showRegistrationModal.value = true;
-      await nextTick();
-      await initKameraReg();
-    } else {
-      fetchTodayData(); 
-    }
-  } 
-}, { immediate: true });
+  try {
+    // Fetch data user terbaru dari server agar face_descriptor selalu sinkron
+    const res = await axios.get(`/user/${newId}`) // Sesuaikan endpoint dengan backend Anda
+    const freshUser = res.data.user
+
+    // Merge data terbaru ke store & localStorage
+    authStore.user = { ...authStore.user, ...freshUser }
+    localStorage.setItem('user', JSON.stringify(authStore.user))
+  } catch (e) {
+    // Jika gagal fetch (misal offline), lanjut pakai data lokal yang ada
+    console.warn('Gagal sinkronisasi data user dari server, menggunakan data lokal:', e.message)
+  }
+
+  // Validasi face_descriptor menggunakan helper yang robust
+  if (!hasFaceDescriptor(authStore.user)) {
+    // Belum ada data wajah → paksa registrasi
+    showRegistrationModal.value = true
+    await nextTick()
+    await initKameraReg()
+  } else {
+    // Sudah ada data wajah → langsung ke dashboard
+    await fetchTodayData()
+  }
+}, { immediate: true })
+
+onMounted(() => {
+  handleResize()
+  window.addEventListener('resize', handleResize)
+  timer = setInterval(updateTime, 1000)
+  loadModels()
+})
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
   clearInterval(timer)
-  if (streamSaatIni) streamSaatIni.getTracks().forEach(track => track.stop()) 
+  if (streamSaatIni) streamSaatIni.getTracks().forEach(track => track.stop())
 })
-
-// PERBAIKAN: Mengecek face_descriptor setiap kali user dimuat
-watch(() => user.value.id, async (newId) => { 
-  if (newId) { 
-    // Cek apakah face_descriptor kosong/null di database
-    if (!authStore.user.face_descriptor) {
-      showRegistrationModal.value = true;
-      await nextTick();
-      await initKameraReg();
-    } else {
-      fetchTodayData(); 
-    }
-  } 
-}, { immediate: true });
 </script>
 
 <template>
@@ -641,6 +665,7 @@ watch(() => user.value.id, async (newId) => {
       </div>
     </main>
 
+    <!-- MODAL: REGISTRASI WAJAH (INTERN BARU) -->
     <div v-if="showRegistrationModal" class="modal-backdrop z-high" style="background: rgba(0,0,0,0.9);">
       <div class="modal-card camera-modal" style="margin-top: -50px;">
         <div style="text-align: center; margin-bottom: 20px;">
@@ -669,6 +694,7 @@ watch(() => user.value.id, async (newId) => {
       </div>
     </div>
 
+    <!-- MODAL: EDIT LOGBOOK -->
     <div v-if="showEditLogbookModal" class="modal-backdrop">
       <div class="modal-card">
         <h3>Edit Logbook</h3>
@@ -681,6 +707,7 @@ watch(() => user.value.id, async (newId) => {
       </div>
     </div>
 
+    <!-- MODAL: KAMERA ABSENSI -->
     <div v-if="showCameraModal" class="modal-backdrop z-high">
       <div class="modal-card camera-modal">
         <h3>{{ jenisAbsen === 'masuk' ? 'Verifikasi Wajah (Masuk)' : 'Verifikasi Wajah (Keluar)' }}</h3>
@@ -698,6 +725,7 @@ watch(() => user.value.id, async (newId) => {
       </div>
     </div>
 
+    <!-- MODAL: FORM IZIN -->
     <div v-if="showIzinModal" class="modal-backdrop z-high">
       <div class="modal-card">
         <h3>Form Izin Tidak Masuk</h3>
@@ -738,7 +766,7 @@ watch(() => user.value.id, async (newId) => {
   --text-muted: #64748B;
   --border-color: #E2E8F0;
 }
-  * {
+* {
   box-sizing: border-box;
 }
 
@@ -762,13 +790,13 @@ watch(() => user.value.id, async (newId) => {
 .btn-logout:hover { background: #e74c3c; color: white; }
 
 /* HEADER & MAIN CONTENT */
-.main-content { flex: 1; display: flex; flex-direction: column; overflow-x: hidden;overflow-y: auto; }
+.main-content { flex: 1; display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; }
 .topbar { background: white; padding: 20px 30px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); }
 .menu-toggle { display: none; background: none; border: none; font-size: 1.5rem; color: var(--bri-blue); cursor: pointer; }
 .datetime-display { text-align: right; }
 .date { display: block; font-size: 0.85rem; color: var(--text-muted); }
 .time { font-size: 1.2rem; font-weight: 800; color: var(--bri-blue); }
-.content-wrapper { padding: 30px; margin: 0 auto;max-width: 100%; width: 100%; }
+.content-wrapper { padding: 30px; margin: 0 auto; max-width: 100%; width: 100%; }
 .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; } 
 .right-column { display: flex; flex-direction: column; gap: 25px; }
 
@@ -842,7 +870,7 @@ watch(() => user.value.id, async (newId) => {
 .modal-card { background: white; padding: 30px; border-radius: 16px; width: 90%; max-width: 450px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); }
 .video-container { width: 100%; aspect-ratio: 4/3; background: #000; border-radius: 12px; overflow: hidden; margin-top: 15px; }
 .video-container video { width: 100%; height: 100%; object-fit: cover; }
-.form-input { width: 100%; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; font-family: inherit; margin-top: 5px; box-sizing: border-box;}
+.form-input { width: 100%; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; font-family: inherit; margin-top: 5px; box-sizing: border-box; }
 .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
 .btn-batal { padding: 12px; background: #F1F5F9; border: 1px solid #CBD5E1; color: #475569; border-radius: 10px; font-weight: bold; cursor: pointer; transition: 0.2s; flex: 1; }
 .btn-batal:hover { background: #E2E8F0; }
@@ -878,7 +906,6 @@ watch(() => user.value.id, async (newId) => {
   .log-text-cell { max-width: 150px; } 
   
   .modal-card { padding: 20px; width: 95%; }
-  .modal-header h3 { font-size: 1.1rem; }
   .modal-actions { flex-direction: column; gap: 8px; }
   .btn-batal, .btn-masuk, .btn-save { width: 100%; margin: 0; }
   
