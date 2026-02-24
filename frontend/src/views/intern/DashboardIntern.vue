@@ -757,13 +757,13 @@ watch(() => user.value.id, async (newId) => {
 .btn-logout:hover { background: #e74c3c; color: white; }
 
 /* HEADER & MAIN CONTENT */
-.main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
+.main-content { flex: 1; display: flex; flex-direction: column; overflow-x: hidden;overflow-y: auto; }
 .topbar { background: white; padding: 20px 30px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); }
 .menu-toggle { display: none; background: none; border: none; font-size: 1.5rem; color: var(--bri-blue); cursor: pointer; }
 .datetime-display { text-align: right; }
 .date { display: block; font-size: 0.85rem; color: var(--text-muted); }
 .time { font-size: 1.2rem; font-weight: 800; color: var(--bri-blue); }
-.content-wrapper { padding: 30px; max-width: 1200px; margin: 0 auto; width: 100%; }
+.content-wrapper { padding: 30px; margin: 0 auto;max-width: 100%; width: 100%; }
 .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; } 
 .right-column { display: flex; flex-direction: column; gap: 25px; }
 
