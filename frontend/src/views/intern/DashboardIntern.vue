@@ -733,6 +733,9 @@ watch(() => user.value.id, async (newId) => {
   --text-muted: #64748B;
   --border-color: #E2E8F0;
 }
+  * {
+  box-sizing: border-box;
+}
 
 .corporate-layout { display: flex; height: 100vh; background-color: var(--bg-color); font-family: 'Inter', sans-serif; overflow: hidden; }
 
