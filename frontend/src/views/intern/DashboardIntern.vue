@@ -86,69 +86,129 @@ const hasFaceDescriptor = (userData) => {
 // FUNGSI KAMERA & VERIFIKASI WAJAH
 // ==========================================
 
+// State untuk tracking apakah model sudah dimuat
+const modelsLoaded = ref(false)
+const isLoadingModels = ref(false)
+
+/**
+ * PERBAIKAN: loadModels dipanggil di onMounted agar model sudah siap
+ * sebelum user klik tombol registrasi. Tidak perlu download ulang saat klik.
+ */
 const loadModels = async () => {
+  if (modelsLoaded.value) return // Jangan load ulang kalau sudah ada
+  
+  isLoadingModels.value = true
   try {
     await faceapi.tf.setBackend('webgl')
     await faceapi.tf.ready()
-    await faceapi.nets.tinyFaceDetector.loadFromUri('/models')
-    await faceapi.nets.faceLandmark68Net.loadFromUri('/models')
-    await faceapi.nets.faceRecognitionNet.loadFromUri('/models')
-    console.log('Model Face API berhasil dimuat dengan WebGL!')
+    await Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
+      faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
+      faceapi.nets.faceRecognitionNet.loadFromUri('/models'),
+    ])
+    modelsLoaded.value = true
+    console.log('✅ Model Face API berhasil dimuat!')
   } catch (error) {
-    console.error('Gagal memuat model Face API:', error)
+    console.error('❌ Gagal memuat model Face API:', error)
+  } finally {
+    isLoadingModels.value = false
   }
 }
 
-// REGISTRASI WAJAH
+/**
+ * PERBAIKAN UTAMA REGISTRASI:
+ * 1. Capture frame dari video SEBELUM tutup modal (pakai canvas)
+ * 2. LANGSUNG tutup modal + stop kamera → user tidak bingung
+ * 3. Tampilkan loading SweetAlert2
+ * 4. Proses deteksi dari frame yang sudah di-capture (bukan dari video live)
+ */
 const prosesRegistrasiWajah = async () => {
   if (!videoElementReg.value) return
 
+  // STEP 1: Capture frame dari video live ke canvas (sangat cepat, <10ms)
+  const canvas = document.createElement('canvas')
+  canvas.width = videoElementReg.value.videoWidth
+  canvas.height = videoElementReg.value.videoHeight
+  canvas.getContext('2d').drawImage(videoElementReg.value, 0, 0)
+
+  // STEP 2: LANGSUNG tutup kamera dan modal → instant feedback ke user
+  if (streamSaatIni) streamSaatIni.getTracks().forEach(track => track.stop())
+  showRegistrationModal.value = false
   isScanning.value = true
 
-  Swal.fire({ 
-    title: 'Menganalisis Wajah...', 
-    html: 'Mohon diam sejenak, sistem sedang mengunci biometrik Anda...', 
-    allowOutsideClick: false, 
-    didOpen: () => Swal.showLoading() 
+  // STEP 3: Tampilkan loading overlay (kamera sudah ditutup, user lihat ini)
+  Swal.fire({
+    title: '🔍 Memindai Wajah...',
+    html: `
+      <div style="text-align:center; padding: 10px 0;">
+        <p style="color:#64748b; font-size:0.95rem; margin-bottom: 16px;">
+          Sistem sedang menganalisis biometrik Anda.<br>Mohon tunggu sebentar...
+        </p>
+        <div style="
+          width: 60px; height: 60px; margin: 0 auto;
+          border: 5px solid #e2e8f0;
+          border-top-color: #00529C;
+          border-radius: 50%;
+          animation: spin 0.8s linear infinite;
+        "></div>
+      </div>
+      <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+    `,
+    allowOutsideClick: false,
+    showConfirmButton: false,
   })
 
   try {
+    // Pastikan model sudah siap (fallback jika belum selesai load)
+    if (!modelsLoaded.value) {
+      Swal.update({ title: '⏳ Memuat Model AI...', html: '<p style="color:#64748b">Memuat model pengenalan wajah, ini hanya terjadi sekali...</p>' })
+      await loadModels()
+    }
+
+    // STEP 4: Proses deteksi dari canvas (bukan video live yang sudah dimatikan)
     const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 })
     const detection = await faceapi
-      .detectSingleFace(videoElementReg.value, options)
+      .detectSingleFace(canvas, options)
       .withFaceLandmarks()
       .withFaceDescriptor()
 
-    // Tutup kamera & modal segera setelah deteksi
-    if (streamSaatIni) streamSaatIni.getTracks().forEach(track => track.stop())
-    showRegistrationModal.value = false
-    isScanning.value = false
-
     if (!detection) {
-      throw new Error('Wajah tidak terdeteksi. Pastikan wajah terlihat jelas dan cahaya cukup.')
+      throw new Error('Wajah tidak terdeteksi. Pastikan wajah terlihat jelas dan pencahayaan cukup.')
     }
 
-    const faceDescriptorArray = Array.from(detection.descriptor)
+    Swal.update({ title: '💾 Menyimpan Data...' })
 
-    await axios.post('/face-register', { 
-      user_id: user.value.id, 
-      face_descriptor: faceDescriptorArray 
+    const faceDescriptorArray = Array.from(detection.descriptor)
+    await axios.post('/face-register', {
+      user_id: user.value.id,
+      face_descriptor: faceDescriptorArray
     })
-    
+
     // Update store & localStorage agar tidak minta registrasi ulang setelah refresh
     authStore.user.face_descriptor = JSON.stringify(faceDescriptorArray)
     authStore.user.is_active = true
     localStorage.setItem('user', JSON.stringify(authStore.user))
-    
-    Swal.fire('Berhasil!', 'Wajah berhasil didaftarkan. Selamat datang!', 'success')
+
+    isScanning.value = false
+    await Swal.fire({
+      icon: 'success',
+      title: 'Berhasil Terdaftar! 🎉',
+      text: 'Wajah kamu berhasil didaftarkan. Selamat menggunakan BRIJISENT!',
+      confirmButtonColor: '#00529C'
+    })
     await fetchTodayData()
-    
+
   } catch (error) {
     isScanning.value = false
     const pesan = error.response?.data?.message || error.message || 'Gagal menyimpan data ke server.'
-    await Swal.fire('Registrasi Gagal', pesan, 'error')
-    
-    // Buka kembali modal dan inisialisasi ulang kamera jika gagal
+    await Swal.fire({
+      icon: 'error',
+      title: 'Registrasi Gagal',
+      text: pesan,
+      confirmButtonColor: '#00529C'
+    })
+
+    // Buka kembali modal kamera jika gagal agar user bisa coba ulang
     showRegistrationModal.value = true
     await nextTick()
     await initKameraReg()
@@ -493,6 +553,8 @@ onMounted(() => {
   handleResize()
   window.addEventListener('resize', handleResize)
   timer = setInterval(updateTime, 1000)
+  // Preload model di background saat halaman dibuka
+  // Sehingga saat user klik tombol registrasi, model sudah siap → tidak ada delay
   loadModels()
 })
 
@@ -686,10 +748,22 @@ onUnmounted(() => {
           <video ref="videoElementReg" autoplay playsinline></video>
         </div>
         
-        <div class="modal-actions mt-4">
-          <button @click="prosesRegistrasiWajah" class="btn-action btn-masuk" style="flex:1; padding: 15px;">
-            <span style="font-size: 1.2rem;">📸</span> <span class="btn-text">Daftarkan Wajah Sekarang</span>
+        <div class="modal-actions mt-4" style="flex-direction: column; gap: 8px;">
+          <button 
+            @click="prosesRegistrasiWajah" 
+            class="btn-action btn-masuk" 
+            style="flex:1; padding: 15px; width:100%;"
+            :disabled="isLoadingModels"
+          >
+            <span v-if="isLoadingModels" class="spinner-btn"></span>
+            <span v-else style="font-size: 1.2rem;">📸</span>
+            <span class="btn-text">
+              {{ isLoadingModels ? 'Memuat AI, harap tunggu...' : 'Daftarkan Wajah Sekarang' }}
+            </span>
           </button>
+          <p v-if="isLoadingModels" style="text-align:center; font-size:0.78rem; color:#64748b; margin-top:4px;">
+            ⚙️ Model AI sedang dimuat, ini hanya terjadi sekali saat pertama kali...
+          </p>
         </div>
       </div>
     </div>
@@ -874,6 +948,18 @@ onUnmounted(() => {
 .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
 .btn-batal { padding: 12px; background: #F1F5F9; border: 1px solid #CBD5E1; color: #475569; border-radius: 10px; font-weight: bold; cursor: pointer; transition: 0.2s; flex: 1; }
 .btn-batal:hover { background: #E2E8F0; }
+
+/* SPINNER BUTTON */
+.spinner-btn {
+  display: inline-block;
+  width: 18px; height: 18px;
+  border: 3px solid rgba(255,255,255,0.4);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* UTILITIES */
 .flex-1 { flex: 1; } .flex-2 { flex: 2; }
