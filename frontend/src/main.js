@@ -1,14 +1,20 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import axios from 'axios' // <-- Tambahkan ini
+import axios from 'axios'
 
 import App from './App.vue'
 import router from './router'
 
-// Atur Base URL mengarah ke server aaPanel kamu
 axios.defaults.baseURL = 'https://api-brijisent.duckdns.org/api'
-// Wajibkan balasan berupa JSON
 axios.defaults.headers.common['Accept'] = 'application/json'
+
+// --- TAMBAHKAN KODE INI ---
+// Cek apakah ada token di memori, kalau ada, pasang langsung ke Axios
+const token = localStorage.getItem('token')
+if (token) {
+    axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
+}
+// -------------------------
 
 const app = createApp(App)
 
