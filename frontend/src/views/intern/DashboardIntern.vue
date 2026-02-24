@@ -93,7 +93,7 @@ const prosesRegistrasiWajah = async () => {
     Swal.fire({ title: 'Menyimpan Data...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
     
     const faceDescriptorArray = Array.from(detection.descriptor);
-    await axios.post('http://127.0.0.1:8000/api/face-register', { 
+    await axios.post('/face-register', { 
       user_id: user.value.id, 
       face_descriptor: faceDescriptorArray 
     });
@@ -242,7 +242,7 @@ const submitIzinForm = async () => {
       bukti: formIzin.value.bukti // Ini sekarang isinya murni URL string
     };
 
-    await axios.post('http://127.0.0.1:8000/api/attendances/permit', payload);
+    await axios.post('/attendances/permit', payload);
     
     Swal.fire('Terkirim', 'Izin berhasil diajukan ke HR', 'success')
     showIzinModal.value = false
@@ -255,7 +255,7 @@ const submitIzinForm = async () => {
 
 const toggleStatus= async () => {
   try {
-    const res = await axios.post('http://127.0.0.1:8000/api/attendances/toggle-status', { user_id: user.value.id });
+    const res = await axios.post('/attendances/toggle-status', { user_id: user.value.id });
     if (res.data.success) {
       await fetchTodayData(); 
       Swal.fire('Berhasil', res.data.message, 'success');
@@ -271,7 +271,7 @@ const toggleStatus= async () => {
 const fetchTodayData = async () => {
   if (!user.value?.id) return;
   try {
-    const res = await axios.get(`http://127.0.0.1:8000/api/attendances/today/${user.value.id}`);
+    const res = await axios.get(`/attendances/today/${user.value.id}`);
     todayAttendance.value = res.data.attendance || null;
     logbookText.value = res.data.attendance?.logbook || '';
     isWeekend.value = res.data.is_weekend;
@@ -347,7 +347,7 @@ const simpanLogbook = async () => {
   if (!logbookText.value.trim()) return Swal.fire('Opps', 'Isi dulu kegiatannya, Gar!', 'warning');
   
   try {
-    const res = await axios.post('http://127.0.0.1:8000/api/attendances/logbook', { user_id: user.value.id, logbook: logbookText.value });
+    const res = await axios.post('/attendances/logbook', { user_id: user.value.id, logbook: logbookText.value });
     if (res.data.success) {
       Swal.fire({ icon: 'success', title: 'Tersimpan!', text: 'Laporan kerja BRIJISENT kamu sudah aman.', timer: 2000 });
       await fetchTodayData();
@@ -360,7 +360,7 @@ const simpanLogbook = async () => {
 const fetchHistory = async () => {
   if (!user.value?.id) return;
   try {
-    const res = await axios.get(`http://127.0.0.1:8000/api/attendances/history/${user.value.id}`);
+    const res = await axios.get(`/attendances/history/${user.value.id}`);
     historyAbsen.value = res.data.data; 
   } catch (e) { console.error("Gagal memuat riwayat:", e); }
 };
@@ -389,7 +389,7 @@ const bukaEditLogbook = async (data) => {
 
   if (text !== undefined) {
     try {
-      await axios.post('http://127.0.0.1:8000/api/attendances/logbook', { user_id: user.value.id, logbook: text, date: data.date });
+      await axios.post('/attendances/logbook', { user_id: user.value.id, logbook: text, date: data.date });
       Swal.fire('Tersimpan', 'Logbook berhasil diperbarui', 'success');
       fetchHistory(); 
     } catch (e) { Swal.fire('Gagal', 'Gagal memperbarui logbook', 'error'); }
@@ -408,7 +408,7 @@ const handleResize = () => {
 }
 
 const unduhLaporan = () => {
-  window.open(`http://127.0.0.1:8000/api/attendances/download/${user.value.id}`, '_blank');
+  window.open(`/attendances/download/${user.value.id}`, '_blank');
 };
 
 // ==========================================
