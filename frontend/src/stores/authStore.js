@@ -9,7 +9,7 @@ export const useAuthStore = defineStore('auth', {
         // 1. Fungsi Login sekarang menerima EMAIL dan PASSWORD
         async login(email, password) {
             try {
-                const response = await axios.post(/login', {
+                const response = await axios.post('/login', {
                     email: email,
                     password: password
                 })
