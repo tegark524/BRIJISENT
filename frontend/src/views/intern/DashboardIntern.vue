@@ -570,9 +570,10 @@ onUnmounted(() => {
     <div class="sidebar-overlay" v-if="isSidebarOpen && isMobile" @click="toggleSidebar"></div>
     
     <aside class="sidebar" :class="{ 'open': isSidebarOpen }">
-      <div class="sidebar-header">
-        <div class="logo-space"><span class="logo-text">BRI</span>JISENT</div>
-      </div>
+      <div class="sidebar-header" style="display: flex; align-items: center; gap: 10px; padding: 20px;">
+  <img src="/logo.png" alt="Logo" style="width: 40px; height: 40px; object-fit: contain;">
+  <div class="logo-space" style="border: none; padding: 0;">BRIJISENT</div>
+</div>
       
       <div class="user-profile">
         <div class="avatar">{{ user.name ? user.name.charAt(0).toUpperCase() : 'U' }}</div>
