@@ -941,8 +941,8 @@ button, input, textarea, select { font-family: 'Inter', 'Helvetica Neue', Arial,
 .abtn-blue:hover   { filter: brightness(1.1); }
 .abtn-orange { background: #F37021; color: #ffffff; }
 .abtn-orange:hover { filter: brightness(1.1); }
-.abtn-green  { background: #f0fdf4; color: #16a34a; border: 1.5px solid #bbf7d0; }
-.abtn-green:hover  { background: #dcfce7; }
+.abtn-green  { background: #fffbeb; color: #92400e; border: 1.5px solid #fcd34d; }
+.abtn-green:hover  { background: #fef3c7; }
 .abtn-ghost  { background: #f0f4f9; color: #00529C; border: 1.5px solid #00529C; }
 .abtn-ghost:hover  { background: #e8f1fb; }
 
