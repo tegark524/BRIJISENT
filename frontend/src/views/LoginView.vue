@@ -17,171 +17,80 @@ const isLoading = ref(false)
 // STATE RESET PASSWORD
 const showResetModal = ref(false)
 const step = ref(1)
-const resetForm = ref({ 
-  email: '', 
-  otp: '', 
-  new_password: '', 
-  confirm_password: '' 
-})
+const resetForm = ref({ email: '', otp: '', new_password: '', confirm_password: '' })
 const showNewPassword = ref(false)
 const showConfirmPassword = ref(false)
 const isResetLoading = ref(false)
 
-// Computed untuk cek kecocokan password
 const passwordsMatch = computed(() => {
   if (!resetForm.value.confirm_password) return true
   return resetForm.value.new_password === resetForm.value.confirm_password
 })
 
 const canSubmitReset = computed(() => {
-  return resetForm.value.new_password && 
-         resetForm.value.confirm_password && 
-         passwordsMatch.value &&
-         resetForm.value.otp.length >= 6
+  return resetForm.value.new_password &&
+    resetForm.value.confirm_password &&
+    passwordsMatch.value &&
+    resetForm.value.otp.length >= 6
 })
 
 // ==========================================
-// LOGIKA LOGIN
+// LOGIN
 // ==========================================
 const handleLogin = async () => {
   if (!email.value || !password.value) {
-    return Swal.fire({
-      title: 'Peringatan',
-      text: 'Email dan Password wajib diisi!',
-      icon: 'warning',
-      confirmButtonColor: '#00529C'
-    })
+    return Swal.fire({ title: 'Peringatan', text: 'Email dan Password wajib diisi!', icon: 'warning', confirmButtonColor: '#00529C' })
   }
-
   isLoading.value = true
-  
   try {
     const success = await authStore.login(email.value, password.value)
-    
     if (success) {
-      Swal.fire({
-        title: 'Berhasil!',
-        text: 'Selamat datang kembali',
-        icon: 'success',
-        timer: 1500,
-        showConfirmButton: false
-      })
-      
+      Swal.fire({ title: 'Berhasil!', text: 'Selamat datang kembali', icon: 'success', timer: 1500, showConfirmButton: false })
       setTimeout(() => {
         if (authStore.user.role === 'intern') router.push('/intern')
         else if (authStore.user.role === 'hr') router.push('/hr')
       }, 1500)
     } else {
-      Swal.fire({
-        title: 'Gagal Masuk',
-        text: 'Kredensial salah atau tidak ditemukan.',
-        icon: 'error',
-        confirmButtonColor: '#00529C'
-      })
+      Swal.fire({ title: 'Gagal Masuk', text: 'Kredensial salah atau tidak ditemukan.', icon: 'error', confirmButtonColor: '#00529C' })
     }
-  } catch (error) {
-    Swal.fire({
-      title: 'Error',
-      text: 'Terjadi kesalahan pada sistem',
-      icon: 'error',
-      confirmButtonColor: '#00529C'
-    })
+  } catch {
+    Swal.fire({ title: 'Error', text: 'Terjadi kesalahan pada sistem', icon: 'error', confirmButtonColor: '#00529C' })
   } finally {
     isLoading.value = false
   }
 }
 
 // ==========================================
-// LOGIKA LUPA PASSWORD
+// RESET PASSWORD
 // ==========================================
 const requestOTP = async () => {
-  if (!resetForm.value.email) {
-    return Swal.fire({
-      title: 'Peringatan',
-      text: 'Email wajib diisi!',
-      icon: 'warning',
-      confirmButtonColor: '#00529C'
-    })
-  }
-
+  if (!resetForm.value.email) return Swal.fire({ title: 'Peringatan', text: 'Email wajib diisi!', icon: 'warning', confirmButtonColor: '#00529C' })
   isResetLoading.value = true
-  
   try {
-    Swal.fire({ 
-      title: 'Mengirim Email...', 
-      allowOutsideClick: false, 
-      didOpen: () => Swal.showLoading() 
-    })
-    
-    await axios.post('/send-otp-email', { 
-      email: resetForm.value.email 
-    })
-    
+    Swal.fire({ title: 'Mengirim Email...', allowOutsideClick: false, didOpen: () => Swal.showLoading() })
+    await axios.post('/send-otp-email', { email: resetForm.value.email })
     Swal.close()
     step.value = 2
-    Swal.fire({
-      title: 'Berhasil!',
-      text: 'Kode OTP telah dikirim ke email kamu.',
-      icon: 'success',
-      confirmButtonColor: '#00529C'
-    })
+    Swal.fire({ title: 'Berhasil!', text: 'Kode OTP telah dikirim ke email kamu.', icon: 'success', confirmButtonColor: '#00529C' })
   } catch (e) {
-    Swal.fire({
-      title: 'Gagal',
-      text: e.response?.data?.message || 'Email tidak terdaftar',
-      icon: 'error',
-      confirmButtonColor: '#00529C'
-    })
+    Swal.fire({ title: 'Gagal', text: e.response?.data?.message || 'Email tidak terdaftar', icon: 'error', confirmButtonColor: '#00529C' })
   } finally {
     isResetLoading.value = false
   }
 }
 
 const submitReset = async () => {
-  if (resetForm.value.new_password !== resetForm.value.confirm_password) {
-    return Swal.fire({
-      title: 'Peringatan',
-      text: 'Password baru dan konfirmasi password tidak cocok!',
-      icon: 'warning',
-      confirmButtonColor: '#00529C'
-    })
-  }
-
-  if (resetForm.value.new_password.length < 6) {
-    return Swal.fire({
-      title: 'Peringatan',
-      text: 'Password minimal 6 karakter!',
-      icon: 'warning',
-      confirmButtonColor: '#00529C'
-    })
-  }
-
+  if (resetForm.value.new_password !== resetForm.value.confirm_password)
+    return Swal.fire({ title: 'Peringatan', text: 'Password baru tidak cocok!', icon: 'warning', confirmButtonColor: '#00529C' })
+  if (resetForm.value.new_password.length < 6)
+    return Swal.fire({ title: 'Peringatan', text: 'Password minimal 6 karakter!', icon: 'warning', confirmButtonColor: '#00529C' })
   isResetLoading.value = true
-
   try {
-    await axios.post('/reset-password', {
-      email: resetForm.value.email,
-      otp: resetForm.value.otp,
-      new_password: resetForm.value.new_password
-    })
-    
-    Swal.fire({
-      title: 'Sandi Diperbarui!',
-      text: 'Silakan login menggunakan sandi baru kamu.',
-      icon: 'success',
-      confirmButtonColor: '#00529C'
-    })
-    
-    showResetModal.value = false
-    step.value = 1
-    resetForm.value = { email: '', otp: '', new_password: '', confirm_password: '' }
+    await axios.post('/reset-password', { email: resetForm.value.email, otp: resetForm.value.otp, new_password: resetForm.value.new_password })
+    Swal.fire({ title: 'Sandi Diperbarui!', text: 'Silakan login dengan sandi baru kamu.', icon: 'success', confirmButtonColor: '#00529C' })
+    closeModal()
   } catch (e) {
-    Swal.fire({
-      title: 'Gagal',
-      text: e.response?.data?.message || 'Kode OTP salah atau kedaluwarsa.',
-      icon: 'error',
-      confirmButtonColor: '#00529C'
-    })
+    Swal.fire({ title: 'Gagal', text: e.response?.data?.message || 'Kode OTP salah atau kedaluwarsa.', icon: 'error', confirmButtonColor: '#00529C' })
   } finally {
     isResetLoading.value = false
   }
@@ -195,1075 +104,712 @@ const closeModal = () => {
 </script>
 
 <template>
-  <div class="login-container">
-    <!-- Background Elements -->
-    <div class="bg-shapes">
-      <div class="shape shape-1"></div>
-      <div class="shape shape-2"></div>
-      <div class="shape shape-3"></div>
-    </div>
+  <div class="page">
 
-    <!-- Login Card -->
-    <div class="login-card">
-      <!-- Header dengan Logo -->
-      <div class="card-header">
-        <div class="logo-container">
-          <div class="logo-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-            </svg>
+    <!-- ===== LEFT PANEL (branding) ===== -->
+    <div class="left-panel">
+      <!-- Geometric accent -->
+      <div class="lp-grid"></div>
+      <div class="lp-circle lp-circle-1"></div>
+      <div class="lp-circle lp-circle-2"></div>
+
+      <div class="lp-content">
+        <div class="lp-logo-wrap">
+          <img src="/LOGO.png" alt="BRI Logo" class="lp-logo" onerror="this.style.display='none'" />
+        </div>
+        <div class="lp-divider"></div>
+        <h1 class="lp-title">BRIJISENT</h1>
+        <p class="lp-subtitle">Portal Absensi<br>Industrial</p>
+
+        <div class="lp-features">
+          <div class="lp-feat">
+            <div class="lp-feat-dot"></div>
+            <span>Absensi biometrik berbasis wajah</span>
+          </div>
+          <div class="lp-feat">
+            <div class="lp-feat-dot"></div>
+            <span>Logbook harian terintegrasi</span>
+          </div>
+          <div class="lp-feat">
+            <div class="lp-feat-dot"></div>
+            <span>Manajemen kehadiran real-time</span>
           </div>
         </div>
-        <h1 class="brand-title">BRIJISENT</h1>
-        <p class="brand-subtitle">Portal Absensi Industrial</p>
-        <div class="header-line"></div>
       </div>
 
-      <!-- Form Login -->
-      <div class="form-container">
-        <div class="input-wrapper">
-          <label class="input-label">
-            <svg class="label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-              <polyline points="22,6 12,13 2,6"/>
-            </svg>
+      <p class="lp-copy">© 2024 PT Bank Rakyat Indonesia</p>
+    </div>
+
+    <!-- ===== RIGHT PANEL (form) ===== -->
+    <div class="right-panel">
+      <div class="form-card">
+
+        <!-- Mobile logo (hanya muncul di mobile) -->
+        <div class="mobile-brand">
+          <img src="/LOGO.png" alt="BRI" class="mb-logo" onerror="this.style.display='none'" />
+          <span class="mb-title">BRI<span class="mb-orange">JISENT</span></span>
+        </div>
+
+        <!-- Heading -->
+        <div class="form-head">
+          <h2 class="form-title">Masuk ke Sistem</h2>
+          <p class="form-sub">Silakan masukkan kredensial Anda untuk melanjutkan</p>
+        </div>
+
+        <!-- EMAIL -->
+        <div class="field">
+          <label class="flbl">
+            <svg width="14" height="14" fill="none" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" stroke="currentColor" stroke-width="1.8"/><polyline points="22,6 12,13 2,6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
             Alamat Email
           </label>
-          <div class="input-field">
-            <input 
-              v-model="email" 
-              type="email" 
+          <div class="inp-wrap">
+            <input
+              v-model="email"
+              type="email"
               placeholder="nama@perusahaan.com"
+              class="inp"
               @keyup.enter="handleLogin"
               :disabled="isLoading"
-            >
+            />
           </div>
         </div>
-        
-        <div class="input-wrapper">
-          <label class="input-label">
-            <svg class="label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-            </svg>
+
+        <!-- PASSWORD -->
+        <div class="field">
+          <label class="flbl">
+            <svg width="14" height="14" fill="none" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M7 11V7a5 5 0 0110 0v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
             Password
           </label>
-          <div class="input-field">
-            <input 
-              v-model="password" 
-              :type="showPassword ? 'text' : 'password'" 
+          <div class="inp-wrap inp-wrap-pw">
+            <input
+              v-model="password"
+              :type="showPassword ? 'text' : 'password'"
               placeholder="Masukkan password"
+              class="inp"
               @keyup.enter="handleLogin"
               :disabled="isLoading"
-            >
-            <button 
-              type="button" 
-              class="toggle-password"
-              @click="showPassword = !showPassword"
-            >
-              <svg v-if="!showPassword" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                <circle cx="12" cy="12" r="3"/>
-              </svg>
-              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
-                <line x1="1" y1="1" x2="23" y2="23"/>
-              </svg>
+            />
+            <button type="button" class="pw-toggle" @click="showPassword = !showPassword" tabindex="-1">
+              <svg v-if="!showPassword" width="18" height="18" fill="none" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/></svg>
+              <svg v-else width="18" height="18" fill="none" viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="1" y1="1" x2="23" y2="23" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
             </button>
           </div>
         </div>
 
-        <button 
-          @click="handleLogin" 
-          class="btn-login"
-          :disabled="isLoading"
-          :class="{ 'loading': isLoading }"
-        >
-          <span v-if="!isLoading">MASUK SISTEM</span>
-          <span v-else class="spinner">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10" stroke-dasharray="60" stroke-dashoffset="20"/>
-            </svg>
+        <!-- SUBMIT -->
+        <button @click="handleLogin" class="btn-login" :disabled="isLoading">
+          <span v-if="!isLoading" class="btn-login-inner">
+            <svg width="17" height="17" fill="none" viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Masuk Sistem
+          </span>
+          <span v-else class="btn-loading">
+            <span class="spin-ring"></span>
             Memuat...
           </span>
         </button>
 
-        <div class="divider">
-          <span>atau</span>
-        </div>
+        <!-- DIVIDER -->
+        <div class="divider"><span>atau</span></div>
 
+        <!-- FORGOT -->
         <button @click="showResetModal = true" class="btn-forgot">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-            <line x1="12" y1="17" x2="12.01" y2="17"/>
-          </svg>
+          <svg width="15" height="15" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.8"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="12" y1="17" x2="12.01" y2="17" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
           Lupa Password?
         </button>
-      </div>
 
-      <!-- Footer -->
-      <div class="card-footer">
-        <p>© 2024 BRIJISENT. All rights reserved.</p>
+        <!-- Footer -->
+        <p class="form-foot">© 2024 BRIJISENT · PT Bank Rakyat Indonesia</p>
       </div>
     </div>
 
-    <!-- Modal Reset Password -->
-    <Transition name="modal">
-      <div v-if="showResetModal" class="modal-overlay" @click.self="closeModal">
-        <div class="modal-card">
-          <!-- Progress Steps -->
-          <div class="progress-steps">
-            <div class="step" :class="{ active: step >= 1, completed: step > 1 }">
-              <div class="step-number">1</div>
+    <!-- ============================================================
+         MODAL RESET PASSWORD
+    ============================================================ -->
+    <Transition name="modal-fade">
+      <div v-if="showResetModal" class="modal-bg" @click.self="closeModal">
+        <div class="modal-box">
+
+          <!-- Close -->
+          <button class="modal-x" @click="closeModal">
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+
+          <!-- Steps indicator -->
+          <div class="steps-bar">
+            <div class="step-node" :class="{ 'step-active': step >= 1, 'step-done': step > 1 }">
+              <div class="step-circle">{{ step > 1 ? '✓' : '1' }}</div>
               <span>Email</span>
             </div>
-            <div class="step-line" :class="{ completed: step > 1 }"></div>
-            <div class="step" :class="{ active: step >= 2 }">
-              <div class="step-number">2</div>
+            <div class="step-track" :class="{ 'step-track-done': step > 1 }"></div>
+            <div class="step-node" :class="{ 'step-active': step >= 2 }">
+              <div class="step-circle">2</div>
               <span>Verifikasi</span>
             </div>
           </div>
 
-          <!-- Step 1: Email -->
+          <!-- STEP 1 -->
           <div v-if="step === 1" class="modal-body">
-            <div class="modal-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-                <polyline points="22,6 12,13 2,6"/>
-              </svg>
+            <div class="modal-icon-wrap">
+              <svg width="28" height="28" fill="none" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" stroke="#00529C" stroke-width="1.8"/><polyline points="22,6 12,13 2,6" stroke="#00529C" stroke-width="1.8" stroke-linecap="round"/></svg>
             </div>
-            <h2 class="modal-title">Pemulihan Akses</h2>
-            <p class="modal-desc">
-              Masukkan email terdaftar untuk menerima kode verifikasi (OTP).
-            </p>
-            
-            <div class="input-wrapper">
-              <div class="input-field">
-                <input 
-                  v-model="resetForm.email" 
-                  type="email" 
-                  placeholder="email@perusahaan.com"
-                  @keyup.enter="requestOTP"
-                >
+            <h3 class="modal-title">Pemulihan Akses</h3>
+            <p class="modal-desc">Masukkan email terdaftar untuk menerima kode OTP.</p>
+
+            <div class="field" style="text-align:left">
+              <label class="flbl">Alamat Email</label>
+              <div class="inp-wrap">
+                <input v-model="resetForm.email" type="email" placeholder="email@perusahaan.com" class="inp" @keyup.enter="requestOTP" />
               </div>
             </div>
 
-            <button 
-              @click="requestOTP" 
-              class="btn-primary"
-              :disabled="isResetLoading || !resetForm.email"
-            >
+            <button @click="requestOTP" class="btn-primary" :disabled="isResetLoading || !resetForm.email">
               <span v-if="!isResetLoading">Kirim Kode OTP</span>
-              <span v-else class="spinner-small">Mengirim...</span>
+              <span v-else class="btn-loading"><span class="spin-ring spin-ring-sm"></span>Mengirim...</span>
             </button>
           </div>
 
-          <!-- Step 2: OTP & Password -->
+          <!-- STEP 2 -->
           <div v-if="step === 2" class="modal-body">
-            <div class="modal-icon success">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-                <polyline points="22 4 12 14.01 9 11.01"/>
-              </svg>
+            <div class="modal-icon-wrap modal-icon-ok">
+              <svg width="28" height="28" fill="none" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 11-5.93-9.14" stroke="#059669" stroke-width="1.8" stroke-linecap="round"/><polyline points="22 4 12 14.01 9 11.01" stroke="#059669" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </div>
-            <h2 class="modal-title">Verifikasi OTP</h2>
-            <p class="modal-desc">
-              Kode OTP telah dikirim ke <strong>{{ resetForm.email }}</strong>
-            </p>
+            <h3 class="modal-title">Verifikasi OTP</h3>
+            <p class="modal-desc">Kode OTP telah dikirim ke <strong>{{ resetForm.email }}</strong></p>
 
-            <!-- OTP Input -->
-            <div class="input-wrapper">
-              <label class="input-label">Kode OTP</label>
-              <div class="input-field">
-                <input 
-                  v-model="resetForm.otp" 
-                  type="text" 
-                  placeholder="000000"
-                  maxlength="6"
-                  class="otp-input"
-                >
+            <!-- OTP -->
+            <div class="field" style="text-align:left">
+              <label class="flbl">Kode OTP</label>
+              <div class="inp-wrap">
+                <input v-model="resetForm.otp" type="text" placeholder="000000" maxlength="6" class="inp otp-inp" />
               </div>
             </div>
 
-            <!-- New Password -->
-            <div class="input-wrapper">
-              <label class="input-label">Password Baru</label>
-              <div class="input-field">
-                <input 
-                  v-model="resetForm.new_password" 
-                  :type="showNewPassword ? 'text' : 'password'" 
-                  placeholder="Minimal 6 karakter"
-                >
-                <button 
-                  type="button" 
-                  class="toggle-password"
-                  @click="showNewPassword = !showNewPassword"
-                >
-                  <svg v-if="!showNewPassword" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                    <circle cx="12" cy="12" r="3"/>
-                  </svg>
-                  <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
-                    <line x1="1" y1="1" x2="23" y2="23"/>
-                  </svg>
+            <!-- New password -->
+            <div class="field" style="text-align:left">
+              <label class="flbl">Password Baru</label>
+              <div class="inp-wrap inp-wrap-pw">
+                <input v-model="resetForm.new_password" :type="showNewPassword ? 'text' : 'password'" placeholder="Minimal 6 karakter" class="inp" />
+                <button type="button" class="pw-toggle" @click="showNewPassword = !showNewPassword" tabindex="-1">
+                  <svg v-if="!showNewPassword" width="17" height="17" fill="none" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/></svg>
+                  <svg v-else width="17" height="17" fill="none" viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="1" y1="1" x2="23" y2="23" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
                 </button>
               </div>
             </div>
 
-            <!-- Confirm Password -->
-            <div class="input-wrapper">
-              <label class="input-label">Konfirmasi Password</label>
-              <div class="input-field" :class="{ 'error': !passwordsMatch && resetForm.confirm_password }">
-                <input 
-                  v-model="resetForm.confirm_password" 
-                  :type="showConfirmPassword ? 'text' : 'password'" 
-                  placeholder="Ulangi password baru"
-                >
-                <button 
-                  type="button" 
-                  class="toggle-password"
-                  @click="showConfirmPassword = !showConfirmPassword"
-                >
-                  <svg v-if="!showConfirmPassword" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                    <circle cx="12" cy="12" r="3"/>
-                  </svg>
-                  <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
-                    <line x1="1" y1="1" x2="23" y2="23"/>
-                  </svg>
+            <!-- Confirm password -->
+            <div class="field" style="text-align:left">
+              <label class="flbl">Konfirmasi Password</label>
+              <div class="inp-wrap inp-wrap-pw" :class="{ 'inp-err': !passwordsMatch && resetForm.confirm_password }">
+                <input v-model="resetForm.confirm_password" :type="showConfirmPassword ? 'text' : 'password'" placeholder="Ulangi password baru" class="inp" />
+                <button type="button" class="pw-toggle" @click="showConfirmPassword = !showConfirmPassword" tabindex="-1">
+                  <svg v-if="!showConfirmPassword" width="17" height="17" fill="none" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/></svg>
+                  <svg v-else width="17" height="17" fill="none" viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="1" y1="1" x2="23" y2="23" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
                 </button>
               </div>
-              <span v-if="!passwordsMatch && resetForm.confirm_password" class="error-text">
-                Password tidak cocok!
-              </span>
-              <span v-else-if="passwordsMatch && resetForm.confirm_password" class="success-text">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                  <polyline points="20 6 9 17 4 12"/>
-                </svg>
+              <span v-if="!passwordsMatch && resetForm.confirm_password" class="txt-err">Password tidak cocok!</span>
+              <span v-else-if="passwordsMatch && resetForm.confirm_password" class="txt-ok">
+                <svg width="12" height="12" fill="none" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
                 Password cocok
               </span>
             </div>
 
-            <button 
-              @click="submitReset" 
-              class="btn-success"
-              :disabled="!canSubmitReset || isResetLoading"
-            >
+            <button @click="submitReset" class="btn-primary btn-green" :disabled="!canSubmitReset || isResetLoading">
               <span v-if="!isResetLoading">Simpan Password Baru</span>
-              <span v-else class="spinner-small">Memproses...</span>
+              <span v-else class="btn-loading"><span class="spin-ring spin-ring-sm"></span>Memproses...</span>
             </button>
 
             <button @click="step = 1" class="btn-back">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="19" y1="12" x2="5" y2="12"/>
-                <polyline points="12 19 5 12 12 5"/>
-              </svg>
+              <svg width="14" height="14" fill="none" viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><polyline points="12 19 5 12 12 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
               Kembali
             </button>
           </div>
 
-          <button @click="closeModal" class="btn-close">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="18" y1="6" x2="6" y2="18"/>
-              <line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
-          </button>
         </div>
       </div>
     </Transition>
+
   </div>
 </template>
 
 <style scoped>
-/* ===== VARIABLES & BASE ===== */
-.login-container {
-  min-height: 100vh;
+/* ============================================================
+   RESET
+============================================================ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+button, input { font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif; }
+
+/* ============================================================
+   PAGE SHELL — split layout
+============================================================ */
+.page {
   display: flex;
+  min-height: 100dvh;
+  font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
+  background: #f0f4f9;
+}
+
+/* ============================================================
+   LEFT PANEL — branding
+============================================================ */
+.left-panel {
+  width: 420px;
+  min-width: 420px;
+  background: #00529C;
+  position: relative;
+  display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  position: relative;
   overflow: hidden;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  padding: 20px;
+  flex-shrink: 0;
 }
 
-/* ===== BACKGROUND SHAPES ===== */
-.bg-shapes {
-  position: fixed;
+/* Geometric grid overlay */
+.lp-grid {
+  position: absolute;
   inset: 0;
-  pointer-events: none;
-  overflow: hidden;
+  background-image:
+    linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px);
+  background-size: 40px 40px;
 }
 
-.shape {
+/* Subtle circle accents */
+.lp-circle {
   position: absolute;
   border-radius: 50%;
-  filter: blur(80px);
-  opacity: 0.4;
+  border: 1px solid rgba(255,255,255,.1);
+}
+.lp-circle-1 {
+  width: 380px; height: 380px;
+  top: -120px; right: -140px;
+}
+.lp-circle-2 {
+  width: 260px; height: 260px;
+  bottom: -80px; left: -80px;
+  border-color: rgba(243,112,33,.25);
+  background: rgba(243,112,33,.06);
 }
 
-.shape-1 {
-  width: 500px;
-  height: 500px;
-  background: #f093fb;
-  top: -200px;
-  right: -100px;
-  animation: float 8s ease-in-out infinite;
-}
-
-.shape-2 {
-  width: 400px;
-  height: 400px;
-  background: #4facfe;
-  bottom: -150px;
-  left: -100px;
-  animation: float 10s ease-in-out infinite reverse;
-}
-
-.shape-3 {
-  width: 300px;
-  height: 300px;
-  background: #43e97b;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  animation: pulse 6s ease-in-out infinite;
-}
-
-@keyframes float {
-  0%, 100% { transform: translateY(0) rotate(0deg); }
-  50% { transform: translateY(-30px) rotate(10deg); }
-}
-
-@keyframes pulse {
-  0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.3; }
-  50% { transform: translate(-50%, -50%) scale(1.2); opacity: 0.5; }
-}
-
-/* ===== LOGIN CARD ===== */
-.login-card {
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(20px);
-  width: 100%;
-  max-width: 440px;
-  border-radius: 24px;
-  box-shadow: 
-    0 25px 50px -12px rgba(0, 0, 0, 0.25),
-    0 0 0 1px rgba(255, 255, 255, 0.5) inset;
-  overflow: hidden;
+.lp-content {
   position: relative;
   z-index: 1;
-  animation: slideUp 0.6s ease-out;
-}
-
-@keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(40px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* ===== CARD HEADER ===== */
-.card-header {
-  padding: 40px 40px 20px;
   text-align: center;
-  background: linear-gradient(180deg, rgba(0,82,156,0.05) 0%, transparent 100%);
+  padding: 40px;
 }
 
-.logo-container {
+.lp-logo-wrap {
   display: flex;
   justify-content: center;
   margin-bottom: 20px;
 }
-
-.logo-icon {
-  width: 70px;
-  height: 70px;
-  background: linear-gradient(135deg, #00529C 0%, #003d73 100%);
-  border-radius: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 10px 30px rgba(0, 82, 156, 0.3);
+.lp-logo {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  filter: brightness(0) invert(1);
+  drop-shadow: 0 4px 12px rgba(0,0,0,.2);
 }
 
-.logo-icon svg {
-  width: 35px;
-  height: 35px;
-  color: white;
-}
-
-.brand-title {
-  font-size: 1.8rem;
-  font-weight: 800;
-  color: #1a202c;
-  margin: 0;
-  letter-spacing: 2px;
-  background: linear-gradient(135deg, #00529C 0%, #667eea 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.brand-subtitle {
-  color: #718096;
-  font-size: 0.95rem;
-  margin-top: 8px;
-  font-weight: 500;
-}
-
-.header-line {
-  width: 60px;
-  height: 4px;
-  background: linear-gradient(90deg, #00529C, #667eea);
+.lp-divider {
+  width: 40px;
+  height: 3px;
+  background: #F37021;
   border-radius: 2px;
-  margin: 20px auto 0;
+  margin: 0 auto 18px;
 }
 
-/* ===== FORM CONTAINER ===== */
-.form-container {
-  padding: 30px 40px;
+.lp-title {
+  font-size: 2rem;
+  font-weight: 900;
+  color: #ffffff;
+  letter-spacing: 3px;
+  line-height: 1;
+  margin-bottom: 8px;
 }
 
-/* ===== INPUT STYLES ===== */
-.input-wrapper {
-  margin-bottom: 24px;
+.lp-subtitle {
+  font-size: .9rem;
+  color: rgba(255,255,255,.65);
+  font-weight: 500;
+  line-height: 1.6;
+  margin-bottom: 40px;
 }
 
-.input-label {
+.lp-features {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: left;
+  max-width: 260px;
+  margin: 0 auto;
+}
+.lp-feat {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: #4a5568;
-  margin-bottom: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  gap: 12px;
+}
+.lp-feat-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #F37021;
+  flex-shrink: 0;
+}
+.lp-feat span {
+  font-size: .82rem;
+  color: rgba(255,255,255,.75);
+  font-weight: 500;
+  line-height: 1.4;
 }
 
-.label-icon {
-  width: 16px;
-  height: 16px;
-  color: #00529C;
-}
-
-.input-field {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.input-field input {
-  width: 100%;
-  padding: 14px 18px;
-  padding-right: 50px;
-  border: 2px solid #e2e8f0;
-  border-radius: 12px;
-  font-size: 1rem;
-  transition: all 0.3s ease;
-  background: #f7fafc;
-  color: #2d3748;
-}
-
-.input-field input:focus {
-  border-color: #00529C;
-  background: white;
-  outline: none;
-  box-shadow: 0 0 0 4px rgba(0, 82, 156, 0.1);
-}
-
-.input-field input::placeholder {
-  color: #a0aec0;
-}
-
-.input-field.error input {
-  border-color: #e53e3e;
-  background: #fff5f5;
-}
-
-.toggle-password {
+.lp-copy {
   position: absolute;
-  right: 14px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 4px;
-  color: #a0aec0;
-  transition: color 0.3s;
+  bottom: 20px;
+  left: 0; right: 0;
+  text-align: center;
+  font-size: .7rem;
+  color: rgba(255,255,255,.35);
+  z-index: 1;
+}
+
+/* ============================================================
+   RIGHT PANEL — form
+============================================================ */
+.right-panel {
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 32px 20px;
+  background: #f0f4f9;
+  min-height: 100dvh;
 }
 
-.toggle-password:hover {
-  color: #00529C;
-}
-
-.toggle-password svg {
-  width: 20px;
-  height: 20px;
-}
-
-.error-text {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 0.8rem;
-  color: #e53e3e;
-  margin-top: 6px;
-}
-
-.success-text {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 0.8rem;
-  color: #38a169;
-  margin-top: 6px;
-}
-
-.success-text svg {
-  width: 14px;
-  height: 14px;
-}
-
-/* ===== BUTTONS ===== */
-.btn-login {
-  width: 100%;
-  padding: 16px;
-  background: linear-gradient(135deg, #00529C 0%, #003d73 100%);
-  color: white;
-  border: none;
-  border-radius: 12px;
-  font-size: 1rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 15px rgba(0, 82, 156, 0.3);
-  position: relative;
-  overflow: hidden;
-}
-
-.btn-login:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(0, 82, 156, 0.4);
-}
-
-.btn-login:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.btn-login:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-}
-
-.btn-login.loading {
-  background: linear-gradient(135deg, #718096 0%, #4a5568 100%);
-}
-
-.spinner {
-  display: flex;
+/* Mobile brand — hidden on desktop */
+.mobile-brand {
+  display: none;
   align-items: center;
   justify-content: center;
   gap: 10px;
+  margin-bottom: 28px;
 }
-
-.spinner svg {
-  width: 20px;
-  height: 20px;
-  animation: spin 1s linear infinite;
+.mb-logo {
+  width: 36px; height: 36px;
+  object-fit: contain;
 }
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.spinner-small {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-
-/* Divider */
-.divider {
-  display: flex;
-  align-items: center;
-  margin: 24px 0;
-  color: #a0aec0;
-  font-size: 0.875rem;
-}
-
-.divider::before,
-.divider::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, #e2e8f0, transparent);
-}
-
-.divider span {
-  padding: 0 16px;
-}
-
-/* Forgot Password Button */
-.btn-forgot {
-  width: 100%;
-  padding: 14px;
-  background: transparent;
-  color: #4a5568;
-  border: 2px dashed #e2e8f0;
-  border-radius: 12px;
-  font-size: 0.95rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-
-.btn-forgot:hover {
-  border-color: #00529C;
+.mb-title {
+  font-size: 1.3rem;
+  font-weight: 900;
   color: #00529C;
-  background: rgba(0, 82, 156, 0.05);
+  letter-spacing: 1px;
+}
+.mb-orange { color: #F37021; }
+
+/* FORM CARD */
+.form-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 40px 40px 32px;
+  width: 100%;
+  max-width: 440px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.05), 0 8px 24px rgba(0,0,0,.06);
+  animation: cardIn .4s cubic-bezier(.22,1,.36,1);
+}
+@keyframes cardIn {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: none; }
 }
 
-.btn-forgot svg {
-  width: 18px;
-  height: 18px;
+.form-head { margin-bottom: 28px; }
+.form-title {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: #111827;
+  margin-bottom: 6px;
+}
+.form-sub {
+  font-size: .82rem;
+  color: #64748b;
+  line-height: 1.5;
 }
 
-/* Card Footer */
-.card-footer {
-  padding: 20px 40px;
-  background: #f7fafc;
-  text-align: center;
-  border-top: 1px solid #e2e8f0;
-}
+/* ============================================================
+   FORM FIELDS
+============================================================ */
+.field { margin-bottom: 20px; }
 
-.card-footer p {
-  margin: 0;
-  font-size: 0.8rem;
-  color: #a0aec0;
-}
-
-/* ===== MODAL STYLES - FIXED RESPONSIVE ===== */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(8px);
+.flbl {
   display: flex;
   align-items: center;
-  justify-content: center;
-  z-index: 100;
-  padding: 20px;
-  overflow-y: auto;
+  gap: 7px;
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: #64748b;
+  margin-bottom: 7px;
 }
+.flbl svg { color: #00529C; flex-shrink: 0; }
 
-.modal-card {
-  background: white;
-  width: 100%;
-  max-width: 480px;
-  max-height: 90vh;
-  border-radius: 24px;
-  box-shadow: 
-    0 25px 50px -12px rgba(0, 0, 0, 0.5),
-    0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+.inp-wrap {
   position: relative;
-  overflow: hidden;
-  animation: modalSlideIn 0.4s ease-out;
-  display: flex;
-  flex-direction: column;
+}
+.inp-wrap-pw { display: flex; align-items: center; }
+
+.inp {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 9px;
+  font-size: .9rem;
+  color: #111827;
+  background: #f8fafc;
+  outline: none;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+}
+.inp:focus {
+  border-color: #00529C;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(0,82,156,.1);
+}
+.inp::placeholder { color: #9ca3af; }
+.inp:disabled { opacity: .6; cursor: not-allowed; }
+
+/* OTP special */
+.otp-inp {
+  text-align: center;
+  letter-spacing: 10px;
+  font-size: 1.3rem !important;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
 }
 
-/* Scrollable content inside modal */
-.modal-card > *:not(.progress-steps) {
-  overflow-y: auto;
+/* Password toggle */
+.pw-toggle {
+  position: absolute;
+  right: 13px;
+  background: none; border: none;
+  cursor: pointer; color: #9ca3af;
+  display: flex; align-items: center; justify-content: center;
+  padding: 2px;
+  transition: color .15s;
+  z-index: 1;
+}
+.pw-toggle:hover { color: #00529C; }
+
+/* Error border */
+.inp-err .inp { border-color: #dc2626; background: #fff5f5; }
+.inp-err .inp:focus { box-shadow: 0 0 0 3px rgba(220,38,38,.1); }
+
+.txt-err { display: flex; align-items: center; gap: 4px; font-size: .72rem; color: #dc2626; margin-top: 5px; }
+.txt-ok  { display: flex; align-items: center; gap: 4px; font-size: .72rem; color: #059669; margin-top: 5px; }
+
+/* ============================================================
+   BUTTONS
+============================================================ */
+.btn-login {
+  width: 100%;
+  padding: 13px;
+  background: #00529C;
+  color: #ffffff;
+  border: none;
+  border-radius: 9px;
+  font-size: .9rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter .15s, transform .1s;
+  margin-top: 4px;
+}
+.btn-login:hover:not(:disabled) { filter: brightness(1.1); transform: translateY(-1px); }
+.btn-login:active:not(:disabled) { transform: none; }
+.btn-login:disabled { background: #e2e8f0; color: #9ca3af; cursor: not-allowed; }
+
+.btn-login-inner {
+  display: flex; align-items: center; justify-content: center; gap: 9px;
+}
+.btn-loading {
+  display: flex; align-items: center; justify-content: center; gap: 9px;
 }
 
-@keyframes modalSlideIn {
-  from {
-    opacity: 0;
-    transform: scale(0.9) translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
+.divider {
+  display: flex; align-items: center; gap: 12px;
+  margin: 20px 0; color: #9ca3af; font-size: .78rem;
+}
+.divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #e2e8f0; }
+
+.btn-forgot {
+  width: 100%; padding: 12px;
+  background: #f8fafc; color: #475569;
+  border: 1.5px dashed #cbd5e1; border-radius: 9px;
+  font-size: .85rem; font-weight: 600; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.btn-forgot:hover { border-color: #00529C; color: #00529C; background: #e8f1fb; border-style: solid; }
+
+.form-foot {
+  text-align: center;
+  font-size: .7rem;
+  color: #9ca3af;
+  margin-top: 24px;
 }
 
-/* Progress Steps */
-.progress-steps {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px 40px 0;
-  gap: 8px;
+/* ============================================================
+   SPINNER
+============================================================ */
+.spin-ring {
+  display: inline-block;
+  width: 16px; height: 16px;
+  border: 2.5px solid rgba(255,255,255,.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
   flex-shrink: 0;
 }
+.spin-ring-sm { width: 13px; height: 13px; border-width: 2px; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
-.step {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
+/* ============================================================
+   MODAL
+============================================================ */
+.modal-bg {
+  position: fixed; inset: 0;
+  background: rgba(15,23,42,.52);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 500; backdrop-filter: blur(6px); padding: 16px;
 }
 
-.step-number {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: #e2e8f0;
-  color: #718096;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 0.9rem;
-  transition: all 0.3s ease;
+.modal-box {
+  background: #ffffff;
+  border-radius: 16px;
+  width: 100%; max-width: 420px;
+  max-height: 92dvh; overflow-y: auto;
+  box-shadow: 0 24px 48px rgba(0,0,0,.18);
+  position: relative;
 }
 
-.step.active .step-number {
-  background: linear-gradient(135deg, #00529C 0%, #667eea 100%);
-  color: white;
-  box-shadow: 0 4px 12px rgba(0, 82, 156, 0.3);
-}
+.modal-fade-enter-active { animation: mIn .22s cubic-bezier(.34,1.56,.64,1); }
+.modal-fade-leave-active { animation: mIn .18s ease reverse; }
+@keyframes mIn { from { opacity:0; transform:scale(.94) translateY(10px); } to { opacity:1; transform:none; } }
 
-.step.completed .step-number {
-  background: linear-gradient(135deg, #38a169 0%, #2f855a 100%);
-  color: white;
+.modal-x {
+  position: absolute; top: 14px; right: 14px;
+  width: 30px; height: 30px; border-radius: 50%;
+  border: none; background: #f0f4f9; color: #64748b;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  z-index: 10; transition: background .15s;
 }
+.modal-x:hover { background: #e2e8f0; }
 
-.step span {
-  font-size: 0.75rem;
-  color: #718096;
-  font-weight: 600;
+/* STEPS BAR */
+.steps-bar {
+  display: flex; align-items: center; justify-content: center;
+  gap: 6px; padding: 24px 24px 0;
 }
-
-.step.active span {
-  color: #00529C;
+.step-node { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.step-circle {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: #f0f4f9; color: #9ca3af;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .8rem; font-weight: 800;
+  border: 2px solid #e2e8f0;
+  transition: all .25s;
 }
+.step-node span { font-size: .68rem; color: #9ca3af; font-weight: 600; }
+.step-active .step-circle { background: #00529C; color: #fff; border-color: #00529C; }
+.step-active span { color: #00529C; }
+.step-done .step-circle { background: #059669; color: #fff; border-color: #059669; }
 
-.step-line {
-  flex: 1;
-  height: 3px;
-  background: #e2e8f0;
-  border-radius: 2px;
-  max-width: 60px;
-  transition: all 0.3s ease;
+.step-track {
+  width: 48px; height: 2px;
+  background: #e2e8f0; border-radius: 2px;
+  margin-bottom: 16px;
+  transition: background .3s;
 }
+.step-track-done { background: #059669; }
 
-.step-line.completed {
-  background: linear-gradient(90deg, #38a169, #00529C);
-}
-
-/* Modal Body - Scrollable */
+/* MODAL BODY */
 .modal-body {
-  padding: 30px 40px 40px;
+  padding: 20px 28px 28px;
   text-align: center;
-  overflow-y: auto;
-  flex: 1;
 }
 
-.modal-icon {
-  width: 70px;
-  height: 70px;
-  background: linear-gradient(135deg, #ebf8ff 0%, #bee3f8 100%);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto 20px;
-  flex-shrink: 0;
+.modal-icon-wrap {
+  width: 60px; height: 60px; border-radius: 50%;
+  background: #e8f1fb;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 16px;
 }
+.modal-icon-ok { background: #d1fae5; }
 
-.modal-icon svg {
-  width: 32px;
-  height: 32px;
-  color: #00529C;
-}
+.modal-title { font-size: 1.1rem; font-weight: 800; color: #111827; margin-bottom: 6px; }
+.modal-desc { font-size: .82rem; color: #64748b; line-height: 1.55; margin-bottom: 18px; }
+.modal-desc strong { color: #00529C; }
 
-.modal-icon.success {
-  background: linear-gradient(135deg, #f0fff4 0%, #c6f6d5 100%);
-}
-
-.modal-icon.success svg {
-  color: #38a169;
-}
-
-.modal-title {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: #2d3748;
-  margin: 0 0 10px;
-}
-
-.modal-desc {
-  color: #718096;
-  font-size: 0.95rem;
-  margin-bottom: 24px;
-  line-height: 1.6;
-}
-
-.modal-desc strong {
-  color: #00529C;
-}
-
-.otp-input {
-  text-align: center;
-  letter-spacing: 8px;
-  font-size: 1.5rem !important;
-  font-weight: 700;
-  font-family: 'Courier New', monospace;
-}
-
-/* Modal Buttons */
+/* Modal action buttons */
 .btn-primary {
-  width: 100%;
-  padding: 14px;
-  background: linear-gradient(135deg, #00529C 0%, #003d73 100%);
-  color: white;
-  border: none;
-  border-radius: 12px;
-  font-size: 1rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  margin-top: 10px;
+  width: 100%; padding: 12px;
+  background: #00529C; color: #fff;
+  border: none; border-radius: 9px;
+  font-size: .875rem; font-weight: 700; cursor: pointer;
+  transition: filter .15s; margin-top: 6px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
 }
-
-.btn-primary:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(0, 82, 156, 0.3);
-}
-
-.btn-primary:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.btn-success {
-  width: 100%;
-  padding: 14px;
-  background: linear-gradient(135deg, #38a169 0%, #2f855a 100%);
-  color: white;
-  border: none;
-  border-radius: 12px;
-  font-size: 1rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  margin-top: 10px;
-  box-shadow: 0 4px 15px rgba(56, 161, 105, 0.3);
-}
-
-.btn-success:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(56, 161, 105, 0.4);
-}
-
-.btn-success:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  background: #a0aec0;
-}
+.btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
+.btn-primary:disabled { background: #e2e8f0; color: #9ca3af; cursor: not-allowed; }
+.btn-green { background: #059669; }
+.btn-green:hover:not(:disabled) { filter: brightness(1.08); }
+.btn-green:disabled { background: #e2e8f0; }
 
 .btn-back {
-  width: 100%;
-  padding: 12px;
-  background: transparent;
-  color: #718096;
-  border: none;
-  border-radius: 12px;
-  font-size: 0.9rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  margin-top: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
+  width: 100%; padding: 11px; margin-top: 10px;
+  background: transparent; color: #64748b;
+  border: none; border-radius: 9px;
+  font-size: .82rem; font-weight: 600; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  transition: background .15s, color .15s;
+}
+.btn-back:hover { background: #f0f4f9; color: #00529C; }
+
+/* ============================================================
+   RESPONSIVE
+============================================================ */
+
+/* Tablet: left panel lebih kecil */
+@media (max-width: 1024px) {
+  .left-panel { width: 320px; min-width: 320px; }
+  .lp-title { font-size: 1.6rem; }
+  .lp-features { display: none; } /* Sembunyikan fitur di tablet kecil */
 }
 
-.btn-back:hover {
-  color: #00529C;
-  background: rgba(0, 82, 156, 0.05);
-}
-
-.btn-back svg {
-  width: 16px;
-  height: 16px;
-}
-
-.btn-close {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  width: 36px;
-  height: 36px;
-  background: #f7fafc;
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #718096;
-  transition: all 0.3s ease;
-  z-index: 10;
-}
-
-.btn-close:hover {
-  background: #e2e8f0;
-  color: #2d3748;
-}
-
-.btn-close svg {
-  width: 18px;
-  height: 18px;
-}
-
-/* Modal Transitions */
-.modal-enter-active,
-.modal-leave-active {
-  transition: all 0.3s ease;
-}
-
-.modal-enter-from,
-.modal-leave-to {
-  opacity: 0;
-}
-
-.modal-enter-from .modal-card,
-.modal-leave-to .modal-card {
-  transform: scale(0.9) translateY(20px);
-}
-
-/* ===== RESPONSIVE - LAPTOP & DESKTOP ===== */
-@media (min-width: 1024px) {
-  .modal-card {
-    max-width: 550px;
-  }
-  
-  .modal-body {
-    padding: 40px 50px 50px;
-  }
-  
-  .modal-title {
-    font-size: 1.75rem;
-  }
-  
-  .input-field input {
-    padding: 16px 20px;
-    padding-right: 55px;
-    font-size: 1.1rem;
-  }
-  
-  .otp-input {
-    font-size: 1.75rem !important;
-  }
-}
-
-@media (min-width: 1440px) {
-  .modal-card {
-    max-width: 600px;
-  }
-  
-  .modal-body {
-    padding: 50px 60px 60px;
-  }
-}
-
-/* ===== RESPONSIVE - MOBILE ===== */
-@media (max-width: 640px) {
-  .login-container {
-    padding: 10px;
+/* Mobile: sembunyikan left panel, tampilkan mobile brand */
+@media (max-width: 768px) {
+  .page { display: block; }
+  .left-panel { display: none; }
+  .right-panel {
+    min-height: 100dvh;
+    padding: 24px 16px;
     align-items: flex-start;
-    padding-top: 20px;
+    padding-top: 32px;
   }
-  
-  .login-card {
-    border-radius: 20px;
-    max-height: calc(100vh - 40px);
-    overflow-y: auto;
+  .mobile-brand { display: flex; }
+  .form-card {
+    padding: 28px 24px 24px;
+    max-width: 100%;
+    border-radius: 14px;
   }
-  
-  .card-header,
-  .form-container {
-    padding-left: 24px;
-    padding-right: 24px;
-  }
-  
-  .brand-title {
-    font-size: 1.5rem;
-  }
-  
-  .modal-overlay {
-    padding: 10px;
-    align-items: flex-start;
-    padding-top: 20px;
-  }
-  
-  .modal-card {
-    max-height: calc(100vh - 40px);
-    border-radius: 20px;
-  }
-  
-  .modal-body {
-    padding: 20px 24px 30px;
-  }
-  
-  .progress-steps {
-    padding: 20px 24px 0;
-  }
-  
-  .modal-title {
-    font-size: 1.25rem;
-  }
-  
-  .otp-input {
-    font-size: 1.25rem !important;
-    letter-spacing: 6px;
-  }
+  .form-title { font-size: 1.2rem; }
+
+  /* Modal mobile */
+  .modal-box { max-height: 95dvh; border-radius: 14px; }
+  .modal-body { padding: 16px 20px 24px; }
+  .steps-bar { padding: 20px 20px 0; }
 }
 
-/* Small mobile */
 @media (max-width: 380px) {
-  .card-header {
-    padding: 30px 20px 15px;
-  }
-  
-  .form-container {
-    padding: 20px;
-  }
-  
-  .logo-icon {
-    width: 60px;
-    height: 60px;
-  }
-  
-  .logo-icon svg {
-    width: 28px;
-    height: 28px;
-  }
-  
-  .brand-title {
-    font-size: 1.3rem;
-  }
+  .right-panel { padding: 16px 12px; padding-top: 24px; }
+  .form-card { padding: 22px 18px 20px; }
+  .otp-inp { letter-spacing: 6px; font-size: 1.1rem !important; }
 }
 </style>
