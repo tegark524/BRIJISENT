@@ -525,7 +525,7 @@ onUnmounted(() => {
                 v-model="logbookText"
                 class="lb-area"
                 rows="7"
-                :placeholder="todayAttendance?.status === 'permit' ? 'Sedang izin — tidak perlu mengisi logbook.' : 'Contoh: Meeting tim, debugging API, review kode...'"
+                :placeholder="todayAttendance?.status === 'permit' ? 'Sedang izin — tidak perlu mengisi logbook.' : 'Contoh: Meeting tim, Input Data...'"
                 :disabled="!todayAttendance?.id || todayAttendance?.status === 'permit'"
               ></textarea>
               <button @click="simpanLogbook" class="btn-save-lb" :disabled="!todayAttendance?.id || !logbookText.trim() || todayAttendance?.status === 'permit'">
