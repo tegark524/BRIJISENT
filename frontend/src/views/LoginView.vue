@@ -137,7 +137,7 @@ const closeModal = () => {
         </div>
       </div>
 
-      <p class="lp-copy">© 2024 PT Bank Rakyat Indonesia</p>
+      <p class="lp-copy">© 2026 BRIJISENT · PT Bank Rakyat Indonesia KC Jemur Sari</p>
     </div>
 
     <!-- ===== RIGHT PANEL (form) ===== -->
@@ -218,7 +218,7 @@ const closeModal = () => {
         </button>
 
         <!-- Footer -->
-        <p class="form-foot">© 2024 BRIJISENT · PT Bank Rakyat Indonesia</p>
+        <p class="form-foot">© 2026 BRIJISENT · PT Bank Rakyat Indonesia KC Jemur Sari</p>
       </div>
     </div>
 
