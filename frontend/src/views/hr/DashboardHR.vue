@@ -212,6 +212,52 @@ onMounted(() => {
 })
 
 onUnmounted(() => { clearInterval(timer); clearInterval(refreshTimer); })
+
+// --- STATE EDIT ABSENSI MANUAL ---
+const showEditAttendanceModal = ref(false)
+const formAttendance = ref({ id: null, date: '', nama: '', clock_in: '', clock_out: '', status: '' })
+
+const openEditAttendance = (att) => {
+  // Ekstrak jam (HH:mm) jika data sudah ada
+  let inTime = '';
+  if (att.clock_in && att.clock_in !== '--:--') {
+    inTime = att.clock_in.length > 8 ? att.clock_in.substring(11, 16) : att.clock_in.substring(0, 5);
+  }
+  let outTime = '';
+  if (att.clock_out && att.clock_out !== '--:--') {
+    outTime = att.clock_out.length > 8 ? att.clock_out.substring(11, 16) : att.clock_out.substring(0, 5);
+  }
+
+  formAttendance.value = {
+    id: att.id,
+    date: att.tanggal,
+    nama: att.nama,
+    clock_in: inTime,
+    clock_out: outTime,
+    status: att.status
+  };
+  showEditAttendanceModal.value = true;
+}
+
+const saveAttendance = async () => {
+  try {
+    // Tambahkan detik (:00) agar sesuai standar database MySQL
+    const payload = {
+      status: formAttendance.value.status,
+      clock_in: formAttendance.value.clock_in ? `${formAttendance.value.clock_in}:00` : null,
+      clock_out: formAttendance.value.clock_out ? `${formAttendance.value.clock_out}:00` : null,
+    };
+
+    await axios.put(`/hr/attendance/${formAttendance.value.id}`, payload);
+    
+    Swal.fire('Berhasil', 'Data absensi berhasil diubah!', 'success');
+    showEditAttendanceModal.value = false;
+    fetchData(); // Refresh tabel
+  } catch (e) {
+    Swal.fire('Gagal', 'Terjadi kesalahan sistem', 'error');
+  }
+}
+
 </script>
 
 <template>
@@ -320,7 +366,7 @@ onUnmounted(() => { clearInterval(timer); clearInterval(refreshTimer); })
                   <th>Jam Masuk</th>
                   <th>Jam Keluar</th>
                   <th>Logbook Harian</th>
-                  <th style="text-align: center;">Bukti Surat</th> </tr>
+                  <th style="text-align: center;">Aksi/Bukti</th> </tr>
               </thead>
               <tbody>
                 <tr v-for="att in allHistoryData" :key="att.id">
@@ -337,15 +383,15 @@ onUnmounted(() => { clearInterval(timer); clearInterval(refreshTimer); })
                   <td class="log-cell" @click="openLogbookDetail(att.logbook)" :class="{'clickable-log': att.logbook && att.logbook !== '-'}">
                     {{ limitText(att.logbook, 40) }}
                   </td>
-                  <td style="text-align: center;">
-                    <a v-if="att.status === 'permit' && att.evidence_path" 
-                       :href="att.evidence_path" 
-                       target="_blank" 
-                       class="btn-sm-edit" 
-                       style="text-decoration: none; display: inline-block;">
-                       📄 Buka
-                    </a>
-                    <span v-else class="text-muted">-</span>
+                  <td style="text-align: center; display: flex; gap: 8px; justify-content: center; align-items: center;">
+                  <a v-if="att.status === 'permit' && att.evidence_path" 
+                     :href="att.evidence_path" 
+                     target="_blank" 
+                     class="btn-sm-edit" 
+                     style="text-decoration: none;">📄 Buka</a>
+                  <span v-else-if="att.status === 'permit'" class="text-muted">-</span>
+  
+                    <button @click="openEditAttendance(att)" class="btn-sm-edit" style="color: #F59E0B; border-color: #F59E0B;">✏️ Edit</button>
                   </td>
                 </tr>
                 <tr v-if="allHistoryData.length === 0">
