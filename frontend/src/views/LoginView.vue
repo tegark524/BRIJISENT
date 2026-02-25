@@ -166,7 +166,7 @@ const closeModal = () => {
             <input
               v-model="email"
               type="email"
-              placeholder="nama@perusahaan.com"
+              placeholder="nama@gmail.com"
               class="inp"
               @keyup.enter="handleLogin"
               :disabled="isLoading"
