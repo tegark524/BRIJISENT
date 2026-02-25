@@ -12,35 +12,32 @@ const user = computed(() => authStore.user || {})
 // STATE UI & NAVIGATION
 // ==========================================
 const activeMenu = ref('beranda')
-const isMobile = ref(false) 
+const isMobile = ref(false)
+const isTablet = ref(false)
 const isSidebarOpen = ref(true)
-
 const toggleSidebar = () => isSidebarOpen.value = !isSidebarOpen.value
 
 // STATE ATTENDANCE & LOGBOOK
-const todayAttendance = ref(null) 
+const todayAttendance = ref(null)
 const logbookText = ref('')
 const isWeekend = ref(false)
 const currentHoliday = ref(null)
 
 // DATA HISTORY
 const historyAbsen = ref([])
-const historyLogbook = ref([])
 const editLogbookData = ref({ id: null, text: '' })
 const showEditLogbookModal = ref(false)
 
 // WAKTU REALTIME
 const currentTime = ref(new Date())
 let timer = null
-const updateTime = () => { currentTime.value = new Date() }
 
 // ==========================================
 // STATE KAMERA & IZIN
 // ==========================================
 const showCameraModal = ref(false)
 const showRegistrationModal = ref(false)
-const isScanning = ref(false)
-const jenisAbsen = ref('') 
+const jenisAbsen = ref('')
 const listKamera = ref([])
 const kameraTerpilih = ref(null)
 const videoElement = ref(null)
@@ -48,55 +45,33 @@ const videoElementReg = ref(null)
 let streamSaatIni = null
 
 const showIzinModal = ref(false)
-const formIzin = ref({ tanggal: '', alasan: '', bukti: null })
+const formIzin = ref({ tanggal: '', alasan: '', bukti: '' })
+
+// MODEL STATE
+const modelsLoaded = ref(false)
+const isLoadingModels = ref(false)
 
 // ==========================================
 // HELPER: VALIDASI FACE DESCRIPTOR
 // ==========================================
-/**
- * Mengecek apakah face_descriptor valid dan sudah terisi.
- * Menangani semua edge case: null, undefined, string "null", array kosong, dll.
- */
 const hasFaceDescriptor = (userData) => {
   const fd = userData?.face_descriptor
-
-  // Cek semua kemungkinan nilai "kosong"
-  if (fd === null || fd === undefined) return false
-  if (fd === 'null') return false       // String "null" dari JSON.stringify(null)
-  if (fd === '') return false           // String kosong
-  if (fd === '[]') return false         // Array kosong dalam bentuk string
-
-  // Jika berupa string JSON, parse dan validasi isinya
+  if (fd === null || fd === undefined || fd === 'null' || fd === '' || fd === '[]') return false
   if (typeof fd === 'string') {
     try {
       const parsed = JSON.parse(fd)
       return Array.isArray(parsed) && parsed.length > 0
-    } catch {
-      return false
-    }
+    } catch { return false }
   }
-
-  // Jika sudah berupa array langsung (tanpa JSON.stringify)
   if (Array.isArray(fd)) return fd.length > 0
-
   return false
 }
 
 // ==========================================
-// FUNGSI KAMERA & VERIFIKASI WAJAH
+// LOAD MODEL FACE-API
 // ==========================================
-
-// State untuk tracking apakah model sudah dimuat
-const modelsLoaded = ref(false)
-const isLoadingModels = ref(false)
-
-/**
- * PERBAIKAN: loadModels dipanggil di onMounted agar model sudah siap
- * sebelum user klik tombol registrasi. Tidak perlu download ulang saat klik.
- */
 const loadModels = async () => {
-  if (modelsLoaded.value) return // Jangan load ulang kalau sudah ada
-  
+  if (modelsLoaded.value) return
   isLoadingModels.value = true
   try {
     await faceapi.tf.setBackend('webgl')
@@ -107,189 +82,179 @@ const loadModels = async () => {
       faceapi.nets.faceRecognitionNet.loadFromUri('/models'),
     ])
     modelsLoaded.value = true
-    console.log('✅ Model Face API berhasil dimuat!')
   } catch (error) {
-    console.error('❌ Gagal memuat model Face API:', error)
+    console.error('Gagal memuat model:', error)
   } finally {
     isLoadingModels.value = false
   }
 }
 
-/**
- * PERBAIKAN UTAMA REGISTRASI:
- * 1. Capture frame dari video SEBELUM tutup modal (pakai canvas)
- * 2. LANGSUNG tutup modal + stop kamera → user tidak bingung
- * 3. Tampilkan loading SweetAlert2
- * 4. Proses deteksi dari frame yang sudah di-capture (bukan dari video live)
- */
+// ==========================================
+// KAMERA UTILS — robust cross-device
+// ==========================================
+const stopStream = () => {
+  if (streamSaatIni) {
+    streamSaatIni.getTracks().forEach(t => t.stop())
+    streamSaatIni = null
+  }
+}
+
+const startStream = async (videoRef, deviceId) => {
+  stopStream()
+  const constraints = {
+    video: {
+      deviceId: deviceId ? { exact: deviceId } : undefined,
+      width: { ideal: 640 },
+      height: { ideal: 480 },
+      facingMode: deviceId ? undefined : 'user'
+    }
+  }
+  try {
+    streamSaatIni = await navigator.mediaDevices.getUserMedia(constraints)
+    await nextTick()
+    if (videoRef.value) {
+      videoRef.value.srcObject = streamSaatIni
+      await videoRef.value.play().catch(() => {})
+    }
+    return true
+  } catch (e) {
+    console.error('Stream error:', e)
+    return false
+  }
+}
+
+const getKameraList = async () => {
+  try {
+    // Request permission first then stop immediately
+    const tempStream = await navigator.mediaDevices.getUserMedia({ video: true })
+    tempStream.getTracks().forEach(t => t.stop())
+    const devices = await navigator.mediaDevices.enumerateDevices()
+    listKamera.value = devices.filter(d => d.kind === 'videoinput')
+    if (listKamera.value.length > 0 && !kameraTerpilih.value) {
+      kameraTerpilih.value = listKamera.value[0].deviceId
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+// ==========================================
+// REGISTRASI WAJAH
+// ==========================================
+const initKameraReg = async () => {
+  const ok = await getKameraList()
+  if (!ok) {
+    return Swal.fire('Kamera Error', 'Tidak dapat mengakses kamera. Pastikan izin sudah diberikan.', 'error')
+  }
+  await startStream(videoElementReg, kameraTerpilih.value)
+}
+
+const gantiKameraReg = async () => {
+  await startStream(videoElementReg, kameraTerpilih.value)
+}
+
+const captureFrame = (videoRef) => {
+  if (!videoRef.value || videoRef.value.videoWidth === 0) return null
+  const canvas = document.createElement('canvas')
+  canvas.width = videoRef.value.videoWidth
+  canvas.height = videoRef.value.videoHeight
+  canvas.getContext('2d').drawImage(videoRef.value, 0, 0)
+  return canvas
+}
+
 const prosesRegistrasiWajah = async () => {
   if (!videoElementReg.value) return
 
-  // STEP 1: Capture frame dari video live ke canvas (sangat cepat, <10ms)
-  const canvas = document.createElement('canvas')
-  canvas.width = videoElementReg.value.videoWidth
-  canvas.height = videoElementReg.value.videoHeight
-  canvas.getContext('2d').drawImage(videoElementReg.value, 0, 0)
+  // 1. Capture frame SEBELUM tutup kamera
+  const canvas = captureFrame(videoElementReg)
+  if (!canvas) {
+    return Swal.fire('Error', 'Kamera belum siap. Tunggu sebentar lalu coba lagi.', 'warning')
+  }
 
-  // STEP 2: LANGSUNG tutup kamera dan modal → instant feedback ke user
-  if (streamSaatIni) streamSaatIni.getTracks().forEach(track => track.stop())
+  // 2. Tutup kamera & modal SEGERA → instant feedback
+  stopStream()
   showRegistrationModal.value = false
-  isScanning.value = true
 
-  // STEP 3: Tampilkan loading overlay (kamera sudah ditutup, user lihat ini)
+  // 3. Tampilkan loading
   Swal.fire({
-    title: '🔍 Memindai Wajah...',
+    title: 'Memindai Biometrik',
     html: `
-      <div style="text-align:center; padding: 10px 0;">
-        <p style="color:#64748b; font-size:0.95rem; margin-bottom: 16px;">
-          Sistem sedang menganalisis biometrik Anda.<br>Mohon tunggu sebentar...
-        </p>
-        <div style="
-          width: 60px; height: 60px; margin: 0 auto;
-          border: 5px solid #e2e8f0;
-          border-top-color: #00529C;
-          border-radius: 50%;
-          animation: spin 0.8s linear infinite;
-        "></div>
+      <div style="padding:20px 0 10px">
+        <div style="position:relative;width:72px;height:72px;margin:0 auto 16px">
+          <svg width="72" height="72" viewBox="0 0 72 72" fill="none" style="display:block">
+            <circle cx="36" cy="36" r="34" stroke="#e4e9f0" stroke-width="2"/>
+            <circle cx="36" cy="36" r="34" stroke="#00529C" stroke-width="2.5" stroke-dasharray="53 160" stroke-linecap="round" style="animation:rotSpin 1.2s linear infinite;transform-origin:center">
+              <animateTransform attributeName="transform" type="rotate" from="0 36 36" to="360 36 36" dur="1.2s" repeatCount="indefinite"/>
+            </circle>
+          </svg>
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+            <svg width="28" height="28" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" stroke="#00529C" stroke-width="1.8"/><path d="M4 20c0-4.418 3.582-8 8-8s8 3.582 8 8" stroke="#00529C" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </div>
+        </div>
+        <p style="color:#1a2332;font-weight:700;font-size:1rem;margin:0 0 4px">Menganalisis Wajah</p>
+        <p style="color:#64748b;font-size:0.82rem;margin:0">Mohon tunggu sebentar...</p>
       </div>
-      <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
     `,
     allowOutsideClick: false,
     showConfirmButton: false,
   })
 
   try {
-    // Pastikan model sudah siap (fallback jika belum selesai load)
+    // 4. Pastikan model siap
     if (!modelsLoaded.value) {
-      Swal.update({ title: '⏳ Memuat Model AI...', html: '<p style="color:#64748b">Memuat model pengenalan wajah, ini hanya terjadi sekali...</p>' })
+      Swal.update({ title: 'Memuat Model AI...', html: '<p style="color:#64748b;padding:20px 0">Memuat model pengenalan wajah...<br><small style="color:#94a3b8">Hanya terjadi sekali</small></p>' })
       await loadModels()
     }
 
-    // STEP 4: Proses deteksi dari canvas (bukan video live yang sudah dimatikan)
+    // 5. Deteksi dari canvas
     const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 })
-    const detection = await faceapi
-      .detectSingleFace(canvas, options)
-      .withFaceLandmarks()
-      .withFaceDescriptor()
+    const detection = await faceapi.detectSingleFace(canvas, options).withFaceLandmarks().withFaceDescriptor()
 
     if (!detection) {
-      throw new Error('Wajah tidak terdeteksi. Pastikan wajah terlihat jelas dan pencahayaan cukup.')
+      throw new Error('Wajah tidak terdeteksi. Pastikan wajah menghadap kamera dengan pencahayaan yang cukup.')
     }
 
-    Swal.update({ title: '💾 Menyimpan Data...' })
+    Swal.update({ title: 'Menyimpan Data...', html: '<p style="color:#64748b;padding:20px 0">Menyimpan data biometrik ke server...</p>' })
 
     const faceDescriptorArray = Array.from(detection.descriptor)
-    await axios.post('/face-register', {
-      user_id: user.value.id,
-      face_descriptor: faceDescriptorArray
-    })
+    await axios.post('/face-register', { user_id: user.value.id, face_descriptor: faceDescriptorArray })
 
-    // Update store & localStorage agar tidak minta registrasi ulang setelah refresh
     authStore.user.face_descriptor = JSON.stringify(faceDescriptorArray)
     authStore.user.is_active = true
     localStorage.setItem('user', JSON.stringify(authStore.user))
 
-    isScanning.value = false
     await Swal.fire({
       icon: 'success',
-      title: 'Berhasil Terdaftar! 🎉',
-      text: 'Wajah kamu berhasil didaftarkan. Selamat menggunakan BRIJISENT!',
-      confirmButtonColor: '#00529C'
+      title: 'Registrasi Berhasil!',
+      text: 'Wajah Anda telah terdaftar. Selamat menggunakan BRIJISENT.',
+      confirmButtonColor: '#00529C',
+      confirmButtonText: 'Mulai Sekarang'
     })
     await fetchTodayData()
 
   } catch (error) {
-    isScanning.value = false
-    const pesan = error.response?.data?.message || error.message || 'Gagal menyimpan data ke server.'
-    await Swal.fire({
-      icon: 'error',
-      title: 'Registrasi Gagal',
-      text: pesan,
-      confirmButtonColor: '#00529C'
-    })
-
-    // Buka kembali modal kamera jika gagal agar user bisa coba ulang
+    const pesan = error.response?.data?.message || error.message || 'Terjadi kesalahan.'
+    await Swal.fire({ icon: 'error', title: 'Registrasi Gagal', text: pesan, confirmButtonColor: '#00529C' })
     showRegistrationModal.value = true
     await nextTick()
     await initKameraReg()
   }
 }
 
-// ABSENSI
-const prosesAbsenDariKamera = async () => {
-  if (!videoElement.value) return
-
-  isScanning.value = true
-
-  Swal.fire({ 
-    title: 'Memindai Biometrik...', 
-    html: 'Tahan posisi, sedang memverifikasi identitas...', 
-    allowOutsideClick: false, 
-    didOpen: () => Swal.showLoading() 
-  })
-
-  try {
-    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 })
-    const detection = await faceapi
-      .detectSingleFace(videoElement.value, options)
-      .withFaceLandmarks()
-      .withFaceDescriptor()
-
-    tutupKamera()
-    isScanning.value = false
-
-    if (!detection) {
-      throw new Error('Wajah tidak terdeteksi. Pastikan pencahayaan cukup.')
-    }
-
-    const endpoint = jenisAbsen.value === 'masuk' ? '/attendances/clock-in' : '/attendances/clock-out'
-    const faceDescriptorArray = Array.from(detection.descriptor)
-    
-    await axios.post(endpoint, { 
-      user_id: user.value.id, 
-      face_descriptor: faceDescriptorArray 
-    })
-    
-    Swal.fire('Berhasil', `Absen ${jenisAbsen.value} sukses!`, 'success')
-    await fetchTodayData()
-    
-  } catch (error) {
-    isScanning.value = false
-    const pesanError = error.response?.data?.message || error.message || 'Terjadi kesalahan sistem.'
-    await Swal.fire('Gagal Verifikasi', pesanError, 'error')
-    
-    // Kembali ke kamera jika gagal
-    showCameraModal.value = true
-    await nextTick()
-    await initKamera()
+// ==========================================
+// ABSENSI WAJAH
+// ==========================================
+const initKamera = async () => {
+  const ok = await getKameraList()
+  if (!ok) {
+    Swal.fire('Kamera Error', 'Tidak dapat mengakses kamera.', 'error')
+    showCameraModal.value = false
+    return
   }
+  await startStream(videoElement, kameraTerpilih.value)
 }
 
-// --- LOGIKA KAMERA REGISTRASI ---
-const initKameraReg = async () => {
-  try {
-    await navigator.mediaDevices.getUserMedia({ video: true })
-    const devices = await navigator.mediaDevices.enumerateDevices()
-    listKamera.value = devices.filter(device => device.kind === 'videoinput')
-    if (listKamera.value.length > 0) {
-      kameraTerpilih.value = listKamera.value[0].deviceId
-      mulaiStreamReg()
-    }
-  } catch (error) {
-    Swal.fire('Error', 'Kamera tidak dapat diakses.', 'error')
-  }
-}
-
-const mulaiStreamReg = async () => {
-  if (streamSaatIni) streamSaatIni.getTracks().forEach(track => track.stop())
-  const constraints = { video: { deviceId: kameraTerpilih.value ? { exact: kameraTerpilih.value } : undefined } }
-  try {
-    streamSaatIni = await navigator.mediaDevices.getUserMedia(constraints)
-    if (videoElementReg.value) videoElementReg.value.srcObject = streamSaatIni
-  } catch (error) { console.error(error) }
-}
-
-// --- LOGIKA KAMERA ABSENSI ---
 const bukaKamera = async (jenis) => {
   jenisAbsen.value = jenis
   showCameraModal.value = true
@@ -297,56 +262,86 @@ const bukaKamera = async (jenis) => {
   await initKamera()
 }
 
-const initKamera = async () => {
-  try {
-    await navigator.mediaDevices.getUserMedia({ video: true })
-    const devices = await navigator.mediaDevices.enumerateDevices()
-    listKamera.value = devices.filter(device => device.kind === 'videoinput')
-    if (listKamera.value.length > 0) {
-      kameraTerpilih.value = listKamera.value[0].deviceId
-      mulaiStream()
-    }
-  } catch (error) {
-    Swal.fire('Error', 'Kamera tidak dapat diakses. Pastikan izin kamera sudah diberikan.', 'error')
-    showCameraModal.value = false
-  }
+const gantiKamera = async () => {
+  await startStream(videoElement, kameraTerpilih.value)
 }
-
-const mulaiStream = async () => {
-  if (streamSaatIni) streamSaatIni.getTracks().forEach(track => track.stop())
-  const constraints = { video: { deviceId: kameraTerpilih.value ? { exact: kameraTerpilih.value } : undefined } }
-  try {
-    streamSaatIni = await navigator.mediaDevices.getUserMedia(constraints)
-    if (videoElement.value) videoElement.value.srcObject = streamSaatIni
-  } catch (error) { console.error("Error saat memulai stream:", error) }
-}
-
-const gantiKamera = () => { mulaiStream() }
 
 const tutupKamera = () => {
-  if (streamSaatIni) streamSaatIni.getTracks().forEach(track => track.stop())
+  stopStream()
   showCameraModal.value = false
 }
 
+const prosesAbsenDariKamera = async () => {
+  if (!videoElement.value) return
+
+  const canvas = captureFrame(videoElement)
+  if (!canvas) return Swal.fire('Error', 'Kamera belum siap.', 'warning')
+
+  // Tutup kamera SEGERA
+  stopStream()
+  showCameraModal.value = false
+
+  Swal.fire({
+    title: 'Memverifikasi Identitas',
+    html: `
+      <div style="padding:20px 0 10px">
+        <div style="position:relative;width:72px;height:72px;margin:0 auto 16px">
+          <svg width="72" height="72" viewBox="0 0 72 72" fill="none" style="display:block">
+            <circle cx="36" cy="36" r="34" stroke="#e4e9f0" stroke-width="2"/>
+            <circle cx="36" cy="36" r="34" stroke="#00529C" stroke-width="2.5" stroke-dasharray="53 160" stroke-linecap="round">
+              <animateTransform attributeName="transform" type="rotate" from="0 36 36" to="360 36 36" dur="1.2s" repeatCount="indefinite"/>
+            </circle>
+          </svg>
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+            <svg width="28" height="28" fill="none" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" stroke="#00529C" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+        </div>
+        <p style="color:#1a2332;font-weight:700;font-size:1rem;margin:0 0 4px">Verifikasi Biometrik</p>
+        <p style="color:#64748b;font-size:0.82rem;margin:0">Sedang mencocokkan data wajah...</p>
+      </div>
+    `,
+    allowOutsideClick: false,
+    showConfirmButton: false
+  })
+
+  try {
+    if (!modelsLoaded.value) await loadModels()
+
+    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 })
+    const detection = await faceapi.detectSingleFace(canvas, options).withFaceLandmarks().withFaceDescriptor()
+
+    if (!detection) throw new Error('Wajah tidak terdeteksi. Pastikan pencahayaan cukup.')
+
+    const endpoint = jenisAbsen.value === 'masuk' ? '/attendances/clock-in' : '/attendances/clock-out'
+    await axios.post(endpoint, { user_id: user.value.id, face_descriptor: Array.from(detection.descriptor) })
+
+    await Swal.fire({
+      icon: 'success',
+      title: jenisAbsen.value === 'masuk' ? 'Selamat Datang! 👋' : 'Sampai Jumpa! 🏡',
+      text: `Absen ${jenisAbsen.value} berhasil dicatat.`,
+      confirmButtonColor: '#00529C', timer: 2500, timerProgressBar: true
+    })
+    await fetchTodayData()
+
+  } catch (error) {
+    const pesanError = error.response?.data?.message || error.message || 'Terjadi kesalahan sistem.'
+    await Swal.fire({ icon: 'error', title: 'Verifikasi Gagal', text: pesanError, confirmButtonColor: '#00529C' })
+    showCameraModal.value = true
+    await nextTick()
+    await initKamera()
+  }
+}
+
 // ==========================================
-// FUNGSI IZIN & STATUS
+// IZIN & STATUS
 // ==========================================
 const submitIzinForm = async () => {
   if (!formIzin.value.alasan || !formIzin.value.tanggal) {
     return Swal.fire('Peringatan', 'Tanggal dan alasan izin wajib diisi!', 'warning')
   }
-  
   Swal.fire({ title: 'Mengirim...', allowOutsideClick: false, didOpen: () => Swal.showLoading() })
   try {
-    const payload = {
-      user_id: user.value.id,
-      tanggal: formIzin.value.tanggal,
-      alasan: formIzin.value.alasan,
-      bukti: formIzin.value.bukti
-    }
-
-    await axios.post('/attendances/permit', payload)
-    
+    await axios.post('/attendances/permit', { user_id: user.value.id, ...formIzin.value })
     Swal.fire('Terkirim', 'Izin berhasil diajukan ke HR', 'success')
     showIzinModal.value = false
     formIzin.value = { tanggal: '', alasan: '', bukti: '' }
@@ -359,17 +354,12 @@ const submitIzinForm = async () => {
 const toggleStatus = async () => {
   try {
     const res = await axios.post('/attendances/toggle-status', { user_id: user.value.id })
-    if (res.data.success) {
-      await fetchTodayData()
-      Swal.fire('Berhasil', res.data.message, 'success')
-    }
-  } catch (e) {
-    Swal.fire('Gagal', 'Gagal mengubah status', 'error')
-  }
+    if (res.data.success) { await fetchTodayData(); Swal.fire('Berhasil', res.data.message, 'success') }
+  } catch (e) { Swal.fire('Gagal', 'Gagal mengubah status', 'error') }
 }
 
 // ==========================================
-// COMPUTED LOGIC (UI STATE)
+// DATA & COMPUTED
 // ==========================================
 const fetchTodayData = async () => {
   if (!user.value?.id) return
@@ -379,9 +369,7 @@ const fetchTodayData = async () => {
     logbookText.value = res.data.attendance?.logbook || ''
     isWeekend.value = res.data.is_weekend
     currentHoliday.value = res.data.holiday
-  } catch (e) {
-    console.error("Gagal refresh data:", e)
-  }
+  } catch (e) { console.error('Gagal refresh data:', e) }
 }
 
 const attendanceStatus = computed(() => {
@@ -393,63 +381,44 @@ const attendanceStatus = computed(() => {
   return 'BELUM ABSEN'
 })
 
-const statusBadgeStyle = computed(() => {
-  switch(attendanceStatus.value) {
-    case 'DI KANTOR': return 'background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); color: #065f46; border: 1px solid #34d399; box-shadow: 0 4px 10px rgba(52, 211, 153, 0.2);'
-    case 'SEDANG KELUAR': return 'background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); color: #92400e; border: 1px solid #fbbf24; box-shadow: 0 4px 10px rgba(251, 191, 36, 0.2);'
-    case 'SUDAH PULANG': return 'background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); color: #1e40af; border: 1px solid #93c5fd; box-shadow: 0 4px 10px rgba(147, 197, 253, 0.2);'
-    default: return 'background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%); color: #475569; border: 1px solid #cbd5e1;'
+const statusConfig = computed(() => {
+  const map = {
+    'DI KANTOR':        { color: '#059669', bg: '#ecfdf5', border: '#6ee7b7', dot: '#10b981' },
+    'SEDANG KELUAR':    { color: '#d97706', bg: '#fffbeb', border: '#fcd34d', dot: '#f59e0b' },
+    'SUDAH PULANG':     { color: '#1d4ed8', bg: '#eff6ff', border: '#93c5fd', dot: '#3b82f6' },
+    'IZIN TIDAK MASUK': { color: '#7c3aed', bg: '#f5f3ff', border: '#c4b5fd', dot: '#8b5cf6' },
+    'BELUM ABSEN':      { color: '#475569', bg: '#f8fafc', border: '#cbd5e1', dot: '#94a3b8' },
   }
+  return map[attendanceStatus.value] || map['BELUM ABSEN']
 })
 
 const greetingMessage = computed(() => {
-  if (currentHoliday.value) {
-    return { title: 'Hari ini libur 🎉', subtitle: `Selamat berlibur dalam rangka ${currentHoliday.value.description}, nikmati waktu istirahatmu!`, type: 'holiday' }
-  }
-  
-  if (isWeekend.value && !todayAttendance.value) {
-    return { title: 'Akhir Pekan Telah Tiba! 🏖️', subtitle: 'Saatnya recharge energi. Sampai jumpa di hari kerja berikutnya!', type: 'holiday' }
-  }
-
+  if (currentHoliday.value) return { title: 'Hari Libur 🎉', subtitle: `Selamat berlibur — ${currentHoliday.value.description}`, type: 'holiday' }
+  if (isWeekend.value && !todayAttendance.value) return { title: 'Selamat Weekend! 🏖️', subtitle: 'Istirahat yang cukup, sampai Senin!', type: 'holiday' }
   if (todayAttendance.value?.status === 'permit') {
     const alasan = todayAttendance.value.permit_reason || todayAttendance.value.logbook || 'Keperluan tertentu'
-    return { 
-      title: 'Status: Sedang Izin 📝', 
-      subtitle: `Kamu tercatat izin hari ini karena: "${alasan}". Semoga urusanmu lancar!`, 
-      type: 'izin' 
-    }
+    return { title: 'Anda Sedang Izin 📋', subtitle: `Alasan: "${alasan}". Semoga urusanmu lancar!`, type: 'izin' }
   }
-
-  if (todayAttendance.value?.clock_out) {
-    return { title: 'Sudah Check-out 🏡', subtitle: 'Selamat pulang, hati-hati di jalan dan selamat beristirahat!', type: 'pulang' }
-  }
-  
+  if (todayAttendance.value?.clock_out) return { title: 'Selamat Pulang 🏡', subtitle: 'Hati-hati di jalan dan selamat beristirahat!', type: 'pulang' }
   return null
 })
 
 const canClockIn = computed(() => attendanceStatus.value === 'BELUM ABSEN')
 const canClockOut = computed(() => attendanceStatus.value === 'DI KANTOR')
-const canToggleKeluar = computed(() => attendanceStatus.value === 'DI KANTOR' || attendanceStatus.value === 'SEDANG KELUAR')
 
 // ==========================================
-// FUNGSI LOGBOOK & RIWAYAT
+// LOGBOOK & HISTORY
 // ==========================================
 const simpanLogbook = async () => {
-  if (todayAttendance.value?.status === 'permit') {
-    return Swal.fire('Info', 'Kamu sedang izin hari ini, tidak perlu mengisi logbook!', 'info')
-  }
-
-  if (!logbookText.value.trim()) return Swal.fire('Opps', 'Isi dulu kegiatannya!', 'warning')
-  
+  if (todayAttendance.value?.status === 'permit') return Swal.fire('Info', 'Kamu sedang izin, tidak perlu mengisi logbook!', 'info')
+  if (!logbookText.value.trim()) return Swal.fire('Oops', 'Logbook tidak boleh kosong.', 'warning')
   try {
     const res = await axios.post('/attendances/logbook', { user_id: user.value.id, logbook: logbookText.value })
     if (res.data.success) {
-      Swal.fire({ icon: 'success', title: 'Tersimpan!', text: 'Laporan kerja BRIJISENT kamu sudah aman.', timer: 2000 })
+      Swal.fire({ icon: 'success', title: 'Tersimpan!', timer: 1800, showConfirmButton: false })
       await fetchTodayData()
     }
-  } catch (e) {
-    Swal.fire('Gagal', e.response?.data?.message || 'Gagal menyimpan logbook.', 'error')
-  }
+  } catch (e) { Swal.fire('Gagal', e.response?.data?.message || 'Gagal menyimpan logbook.', 'error') }
 }
 
 const fetchHistory = async () => {
@@ -457,94 +426,66 @@ const fetchHistory = async () => {
   try {
     const res = await axios.get(`/attendances/history/${user.value.id}`)
     historyAbsen.value = res.data.data
-  } catch (e) { console.error("Gagal memuat riwayat:", e) }
+  } catch (e) { console.error('Gagal memuat riwayat:', e) }
 }
 
 const formatTgl = (tgl) => {
   if (!tgl) return '-'
   return new Date(tgl).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
 }
-
-const labelStatus = (s) => {
-  const map = { 'present': 'Masuk', 'permit': 'Izin', 'absent': 'Alpa' }
-  return map[s] || 'Masuk'
-}
-
-const statusClass = (s) => {
-  if (s === 'permit') return 'bg-warning-light'
-  if (s === 'absent') return 'bg-danger-light'
-  return 'bg-success-light'
-}
+const formatJam = (jam) => jam || '—'
+const labelStatus = (s) => ({ 'present': 'Hadir', 'permit': 'Izin', 'absent': 'Alpa' }[s] || 'Hadir')
+const statusClass = (s) => ({ 'permit': 'badge-warning', 'absent': 'badge-danger' }[s] || 'badge-success')
 
 const bukaEditLogbook = async (data) => {
   const { value: text } = await Swal.fire({
-    title: 'Edit Logbook', input: 'textarea', inputLabel: `Tanggal: ${formatTgl(data.date)}`,
-    inputValue: data.logbook || '', showCancelButton: true, confirmButtonColor: '#00529C', confirmButtonText: 'Simpan Perubahan'
+    title: 'Edit Logbook', input: 'textarea',
+    inputLabel: `Tanggal: ${formatTgl(data.date)}`,
+    inputValue: data.logbook || '',
+    showCancelButton: true, confirmButtonColor: '#00529C',
+    confirmButtonText: 'Simpan', cancelButtonText: 'Batal'
   })
-
   if (text !== undefined) {
     try {
       await axios.post('/attendances/logbook', { user_id: user.value.id, logbook: text, date: data.date })
-      Swal.fire('Tersimpan', 'Logbook berhasil diperbarui', 'success')
+      Swal.fire({ icon: 'success', title: 'Diperbarui!', timer: 1500, showConfirmButton: false })
       fetchHistory()
-    } catch (e) { Swal.fire('Gagal', 'Gagal memperbarui logbook', 'error') }
+    } catch { Swal.fire('Gagal', 'Gagal memperbarui logbook', 'error') }
   }
 }
 
 const switchMenu = (menu) => {
   activeMenu.value = menu
   if (menu === 'history_absen' || menu === 'history_logbook') fetchHistory()
-  if (isMobile.value) isSidebarOpen.value = false 
+  if (isMobile.value || isTablet.value) isSidebarOpen.value = false
 }
 
 const handleResize = () => {
-  isMobile.value = window.innerWidth <= 768
-  isSidebarOpen.value = !isMobile.value
+  const w = window.innerWidth
+  isMobile.value = w <= 640
+  isTablet.value = w > 640 && w <= 1024
+  // Mobile & Tablet (termasuk iPad portrait ≤1024px): sidebar default tertutup
+  isSidebarOpen.value = w > 1024
 }
 
-const unduhLaporan = () => {
-  window.open(`/attendances/download/${user.value.id}`, '_blank')
-}
+const unduhLaporan = () => window.open(`/attendances/download/${user.value.id}`, '_blank')
 
 // ==========================================
-// LIFECYCLE HOOKS & WATCHERS
+// WATCHER & LIFECYCLE
 // ==========================================
-
-/**
- * PERBAIKAN UTAMA:
- * Hanya ada SATU watcher tunggal di sini.
- * Watcher duplikat yang lama menjadi sumber bug dan sudah dihapus.
- * 
- * Alur:
- * 1. Coba fetch data user terbaru dari server untuk sinkronisasi.
- * 2. Gunakan hasFaceDescriptor() untuk validasi yang robust.
- * 3. Jika belum punya wajah → tampilkan modal registrasi.
- * 4. Jika sudah punya wajah → langsung fetch data absensi hari ini.
- */
 watch(() => user.value.id, async (newId) => {
   if (!newId) return
-
   try {
-    // Fetch data user terbaru dari server agar face_descriptor selalu sinkron
-    const res = await axios.get(`/user/${newId}`) // Sesuaikan endpoint dengan backend Anda
-    const freshUser = res.data.user
-
-    // Merge data terbaru ke store & localStorage
-    authStore.user = { ...authStore.user, ...freshUser }
+    const res = await axios.get(`/user/${newId}`)
+    authStore.user = { ...authStore.user, ...res.data.user }
     localStorage.setItem('user', JSON.stringify(authStore.user))
-  } catch (e) {
-    // Jika gagal fetch (misal offline), lanjut pakai data lokal yang ada
-    console.warn('Gagal sinkronisasi data user dari server, menggunakan data lokal:', e.message)
-  }
+  } catch (e) { console.warn('Sinkronisasi user gagal, pakai data lokal:', e.message) }
 
-  // Validasi face_descriptor menggunakan helper yang robust
   if (!hasFaceDescriptor(authStore.user)) {
-    // Belum ada data wajah → paksa registrasi
     showRegistrationModal.value = true
     await nextTick()
     await initKameraReg()
   } else {
-    // Sudah ada data wajah → langsung ke dashboard
     await fetchTodayData()
   }
 }, { immediate: true })
@@ -552,277 +493,330 @@ watch(() => user.value.id, async (newId) => {
 onMounted(() => {
   handleResize()
   window.addEventListener('resize', handleResize)
-  timer = setInterval(updateTime, 1000)
-  // Preload model di background saat halaman dibuka
-  // Sehingga saat user klik tombol registrasi, model sudah siap → tidak ada delay
+  timer = setInterval(() => { currentTime.value = new Date() }, 1000)
   loadModels()
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
   clearInterval(timer)
-  if (streamSaatIni) streamSaatIni.getTracks().forEach(track => track.stop())
+  stopStream()
 })
 </script>
 
 <template>
-  <div class="corporate-layout">
-    <div class="sidebar-overlay" v-if="isSidebarOpen && isMobile" @click="toggleSidebar"></div>
-    
-    <aside class="sidebar" :class="{ 'open': isSidebarOpen }">
-      <div class="sidebar-header" style="display: flex; align-items: center; gap: 10px; padding: 20px;">
-  <img src="/LOGO.png" alt="Logo" style="width: 40px; height: 40px; object-fit: contain;">
-  <div class="logo-space" style="border: none; padding: 0;">BRIJISENT</div>
-</div>
-      
-      <div class="user-profile">
-        <div class="avatar">{{ user.name ? user.name.charAt(0).toUpperCase() : 'U' }}</div>
-        <div class="user-info">
-          <p class="greeting">Halo,</p>
-          <p class="name">{{ user.name || 'Intern' }}</p>
+  <div class="app-shell">
+
+    <!-- Overlay mobile/tablet -->
+    <div class="sidebar-overlay" v-if="isSidebarOpen && (isMobile || isTablet)" @click="toggleSidebar"></div>
+
+    <!-- ===== SIDEBAR ===== -->
+    <aside class="sidebar" :class="{ 'sidebar--open': isSidebarOpen }">
+      <div class="sidebar-brand">
+        <img src="/LOGO.png" alt="Logo" class="brand-logo" onerror="this.style.display='none'" />
+        <span class="brand-name">BRI<span class="brand-accent">JISENT</span></span>
+      </div>
+
+      <div class="sidebar-user">
+        <div class="user-avatar">{{ user.name ? user.name.charAt(0).toUpperCase() : 'U' }}</div>
+        <div class="user-meta">
+          <span class="user-greeting">Selamat datang,</span>
+          <span class="user-name">{{ user.name || 'Intern' }}</span>
         </div>
       </div>
 
-      <nav class="nav-menu">
-        <button :class="{ active: activeMenu === 'beranda' }" @click="switchMenu('beranda')"><i class="icon">🏠</i> Beranda</button>
-        <button :class="{ active: activeMenu === 'history_absen' }" @click="switchMenu('history_absen')"><i class="icon">📅</i> Riwayat Kehadiran</button>
-        <button :class="{ active: activeMenu === 'history_logbook' }" @click="switchMenu('history_logbook')"><i class="icon">📝</i> Riwayat Logbook</button>
+      <nav class="sidebar-nav">
+        <button class="nav-item" :class="{ 'nav-item--active': activeMenu === 'beranda' }" @click="switchMenu('beranda')">
+          <span class="nav-icon">
+            <svg width="17" height="17" fill="none" viewBox="0 0 24 24"><path d="M3 12L12 3l9 9M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <span>Beranda</span>
+        </button>
+        <button class="nav-item" :class="{ 'nav-item--active': activeMenu === 'history_absen' }" @click="switchMenu('history_absen')">
+          <span class="nav-icon">
+            <svg width="17" height="17" fill="none" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M16 2v4M8 2v4M3 10h18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </span>
+          <span>Riwayat Kehadiran</span>
+        </button>
+        <button class="nav-item" :class="{ 'nav-item--active': activeMenu === 'history_logbook' }" @click="switchMenu('history_logbook')">
+          <span class="nav-icon">
+            <svg width="17" height="17" fill="none" viewBox="0 0 24 24"><path d="M9 12h6M9 8h6M9 16h4M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </span>
+          <span>Riwayat Logbook</span>
+        </button>
       </nav>
 
       <div class="sidebar-footer">
-        <button @click="authStore.logout()" class="btn-logout">Keluar Sistem</button>
+        <button @click="authStore.logout()" class="btn-logout">
+          <svg width="15" height="15" fill="none" viewBox="0 0 24 24"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-6 0v-1m0-8V7a3 3 0 016 0v1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Keluar Sistem
+        </button>
       </div>
     </aside>
 
-    <main class="main-content">
+    <!-- ===== MAIN ===== -->
+    <main class="main">
+
+      <!-- TOPBAR -->
       <header class="topbar">
-        <button class="menu-toggle" @click="toggleSidebar">☰</button>
-        <div class="datetime-display">
-          <span class="date">{{ currentTime.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) }}</span>
-          <span class="time">{{ currentTime.toLocaleTimeString('id-ID') }} WIB</span>
+        <button class="topbar-toggle" @click="toggleSidebar" aria-label="Toggle menu">
+          <svg width="19" height="19" fill="none" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+        <div class="topbar-datetime">
+          <span class="topbar-date">{{ currentTime.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) }}</span>
+          <span class="topbar-time">{{ currentTime.toLocaleTimeString('id-ID') }} <em>WIB</em></span>
         </div>
       </header>
 
-      <div class="content-wrapper">
-        <div v-if="activeMenu === 'beranda'" class="fade-in">
-          
-          <div class="grid-container">
-            <div class="card actions-card">
-              <h3 class="card-title">Aksi Kehadiran</h3>
-              
-              <div v-if="greetingMessage" class="greeting-banner" :class="greetingMessage.type">
-                <div class="greeting-icon">{{ greetingMessage.type === 'holiday' ? '🌴' : (greetingMessage.type === 'izin' ? '📝' : '🎒') }}</div>
-                <div class="greeting-text">
-                  <h4>{{ greetingMessage.title }}</h4>
-                  <p>{{ greetingMessage.subtitle }}</p>
-                </div>
-              </div>
-              
-              <div v-else>
-                <div class="status-banner mb-4" :style="statusBadgeStyle">
-                  <span class="status-label">Status Anda Saat Ini</span>
-                  <strong class="status-value">{{ attendanceStatus }}</strong>
-                </div>
+      <!-- CONTENT -->
+      <div class="content">
 
-                <div class="action-buttons-vertical">
-                  <button v-if="canClockIn" @click="bukaKamera('masuk')" class="btn-action btn-masuk">
-                    <span class="icon-btn">📸</span> <span class="btn-text">Absen Masuk</span>
-                  </button>
+        <!-- ===== BERANDA ===== -->
+        <div v-if="activeMenu === 'beranda'" class="page-fade">
 
-                  <button v-if="!canClockIn && attendanceStatus !== 'IZIN TIDAK MASUK'" @click="bukaKamera('keluar')" class="btn-action" :disabled="!canClockOut" :class="canClockOut ? 'btn-pulang' : 'btn-disabled'">
-                    <span class="icon-btn">🏠</span> <span class="btn-text">{{ attendanceStatus === 'SUDAH PULANG' ? 'Sudah Pulang' : 'Absen Pulang' }}</span>
-                  </button>
-                  
-                  <button v-if="todayAttendance?.id && !todayAttendance.clock_out" @click="toggleStatus" class="btn-action" :class="attendanceStatus === 'SEDANG KELUAR' ? 'btn-kembali' : 'btn-keluar-sementara'">
-                    <span class="icon-btn">{{ attendanceStatus === 'SEDANG KELUAR' ? '🚶‍♂️' : '🏃‍♂️' }}</span> 
-                    <span class="btn-text">{{ attendanceStatus === 'SEDANG KELUAR' ? 'Kembali ke Kantor' : 'Izin Keluar Sebentar' }}</span>
-                  </button>
-
-                  <button v-if="!todayAttendance?.id" @click="showIzinModal = true" class="btn-action btn-izin">
-                    <span class="icon-btn">📝</span> <span class="btn-text">Ajukan Izin Tidak Masuk</span>
-                  </button>
-                </div>
-              </div>
-              
+          <!-- GREETING BANNER -->
+          <div v-if="greetingMessage" class="greeting-card" :class="`greeting--${greetingMessage.type}`">
+            <div class="greeting-icon-wrap">
+              <span v-if="greetingMessage.type==='holiday'">🌴</span>
+              <span v-else-if="greetingMessage.type==='izin'">📋</span>
+              <span v-else>🏡</span>
             </div>
+            <div>
+              <p class="greeting-title">{{ greetingMessage.title }}</p>
+              <p class="greeting-sub">{{ greetingMessage.subtitle }}</p>
+            </div>
+          </div>
 
-            <div class="right-column">
-              <div class="card logbook-card">
-                <div class="card-header-custom">
-                  <h3 class="card-title" style="margin-bottom:0; border-bottom:none;">📝 Logbook Kerja</h3>
-                  <span class="status-indicator" :class="logbookText ? 'status-filled' : 'status-empty'">{{ logbookText ? 'Terisi' : 'Kosong' }}</span>
+          <div class="dashboard-grid">
+
+            <!-- PANEL KEHADIRAN -->
+            <div class="panel">
+              <div class="panel-header">
+                <span class="panel-label">Status Kehadiran</span>
+                <div class="status-chip" :style="`color:${statusConfig.color};background:${statusConfig.bg};border-color:${statusConfig.border}`">
+                  <span class="status-dot" :style="`background:${statusConfig.dot}`"></span>
+                  {{ attendanceStatus }}
                 </div>
-                <div class="logbook-body">
-                  <p class="logbook-hint">Ceritakan progres pekerjaan atau kendala yang kamu hadapi hari ini.</p>
-                  
-                  <textarea 
-                    v-model="logbookText" 
-                    :placeholder="todayAttendance?.status === 'permit' ? 'Istirahat yang cukup ya, tidak perlu mengisi logbook hari ini...' : 'Contoh: Menyelesaikan modul absensi wajah, debugging API...'" 
-                    class="logbook-textarea" 
-                    rows="6" 
-                    :disabled="!todayAttendance?.id || todayAttendance?.status === 'permit'">
-                  </textarea>
-                  
-                  <div class="logbook-footer">
-                    <button 
-                      @click="simpanLogbook" 
-                      class="btn-save-logbook" 
-                      :disabled="!todayAttendance?.id || !logbookText || todayAttendance?.status === 'permit'">
-                      <span class="icon">💾</span> <span class="text">Simpan Laporan Hari Ini</span>
-                    </button>
-                    
-                    <p v-if="!todayAttendance?.id" class="text-warning-sm">*Silakan absen masuk terlebih dahulu untuk mengisi logbook.</p>
-                    <p v-if="todayAttendance?.status === 'permit'" class="text-warning-sm" style="color: #d97706;">*Kamu sedang izin. Fitur logbook dinonaktifkan untuk hari ini.</p>
+              </div>
+
+              <!-- Timeline -->
+              <div class="timeline" v-if="todayAttendance && todayAttendance.status !== 'permit'">
+                <div class="tl-item">
+                  <div class="tl-dot" :class="{ 'tl-dot--on': todayAttendance?.clock_in }"></div>
+                  <div class="tl-text">
+                    <span class="tl-lbl">Jam Masuk</span>
+                    <span class="tl-val">{{ formatJam(todayAttendance?.clock_in) }}</span>
+                  </div>
+                </div>
+                <div class="tl-rule"></div>
+                <div class="tl-item">
+                  <div class="tl-dot" :class="{ 'tl-dot--on': todayAttendance?.clock_out }"></div>
+                  <div class="tl-text">
+                    <span class="tl-lbl">Jam Pulang</span>
+                    <span class="tl-val">{{ formatJam(todayAttendance?.clock_out) }}</span>
                   </div>
                 </div>
               </div>
+
+              <!-- BUTTONS -->
+              <div class="action-stack" v-if="!greetingMessage">
+                <button v-if="canClockIn" @click="bukaKamera('masuk')" class="btn-act btn-act--primary">
+                  <svg width="17" height="17" fill="none" viewBox="0 0 24 24"><path d="M15 10l4.553-2.069A1 1 0 0121 8.87v6.26a1 1 0 01-1.447.9L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" stroke="currentColor" stroke-width="1.8"/></svg>
+                  Absen Masuk
+                </button>
+                <button v-if="!canClockIn && attendanceStatus !== 'IZIN TIDAK MASUK'" @click="bukaKamera('keluar')" class="btn-act btn-act--orange" :disabled="!canClockOut">
+                  <svg width="17" height="17" fill="none" viewBox="0 0 24 24"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                  {{ attendanceStatus === 'SUDAH PULANG' ? 'Sudah Pulang' : 'Absen Pulang' }}
+                </button>
+                <button v-if="todayAttendance?.id && !todayAttendance.clock_out" @click="toggleStatus" class="btn-act btn-act--green">
+                  <svg width="17" height="17" fill="none" viewBox="0 0 24 24"><path d="M8 9l4-4 4 4M16 15l-4 4-4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  {{ attendanceStatus === 'SEDANG KELUAR' ? 'Kembali ke Kantor' : 'Izin Keluar Sebentar' }}
+                </button>
+                <button v-if="!todayAttendance?.id" @click="showIzinModal = true" class="btn-act btn-act--ghost">
+                  <svg width="17" height="17" fill="none" viewBox="0 0 24 24"><path d="M9 12h6m-3-3v6m9-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                  Ajukan Izin Tidak Masuk
+                </button>
+              </div>
+
+              <div class="action-stack" v-if="greetingMessage && !todayAttendance?.id">
+                <button @click="showIzinModal = true" class="btn-act btn-act--ghost">
+                  <svg width="17" height="17" fill="none" viewBox="0 0 24 24"><path d="M9 12h6m-3-3v6m9-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                  Ajukan Izin Tidak Masuk
+                </button>
+              </div>
             </div>
-          </div>
+
+            <!-- PANEL LOGBOOK -->
+            <div class="panel">
+              <div class="panel-header">
+                <span class="panel-label">Logbook Harian</span>
+                <span class="lb-chip" :class="logbookText ? 'lb-chip--filled' : 'lb-chip--empty'">
+                  {{ logbookText ? '✓ Terisi' : '○ Kosong' }}
+                </span>
+              </div>
+              <p class="lb-hint">Catat progress kerja, pencapaian, atau kendala hari ini.</p>
+              <textarea
+                v-model="logbookText"
+                class="lb-area"
+                rows="6"
+                :placeholder="todayAttendance?.status === 'permit' ? 'Sedang izin — tidak perlu mengisi logbook hari ini.' : 'Contoh: Meeting tim, debugging API payment, review kode modul absensi...'"
+                :disabled="!todayAttendance?.id || todayAttendance?.status === 'permit'"
+              ></textarea>
+              <button @click="simpanLogbook" class="btn-save" :disabled="!todayAttendance?.id || !logbookText.trim() || todayAttendance?.status === 'permit'">
+                <svg width="15" height="15" fill="none" viewBox="0 0 24 24"><path d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Simpan Laporan
+              </button>
+              <p v-if="!todayAttendance?.id" class="hint-muted">Absen masuk terlebih dahulu untuk mengisi logbook.</p>
+            </div>
+
+          </div><!-- /grid -->
         </div>
 
-        <div v-if="activeMenu === 'history_absen'" class="fade-in card">
-          <div class="d-flex" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-            <h2 class="section-title-sm" style="font-size:1.2rem;">Riwayat Kehadiran</h2>
-            <button @click="unduhLaporan" class="btn-download">📥 Download Laporan (CSV)</button>
+        <!-- ===== RIWAYAT KEHADIRAN ===== -->
+        <div v-if="activeMenu === 'history_absen'" class="page-fade panel">
+          <div class="panel-header" style="margin-bottom:18px">
+            <span class="panel-label">Riwayat Kehadiran</span>
+            <button @click="unduhLaporan" class="btn-dl">
+              <svg width="14" height="14" fill="none" viewBox="0 0 24 24"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              Unduh CSV
+            </button>
           </div>
-          <div class="table-responsive">
-            <table class="corporate-table-sm">
-              <thead>
-                <tr><th>Tanggal</th><th>Status</th><th>Masuk</th><th>Pulang</th></tr>
-              </thead>
+          <div class="tbl-wrap">
+            <table class="dtbl">
+              <thead><tr><th>Tanggal</th><th>Status</th><th>Masuk</th><th>Pulang</th></tr></thead>
               <tbody>
                 <tr v-for="absen in historyAbsen" :key="absen.id">
-                  <td class="text-nowrap">{{ formatTgl(absen.date) }}</td>
-                  <td><span class="badge-status" :class="statusClass(absen.status)">{{ labelStatus(absen.status) }}</span></td>
-                  <td class="time-cell">{{ absen.clock_in || '--:--' }}</td>
-                  <td class="time-cell">{{ absen.clock_out || '--:--' }}</td>
+                  <td class="td-date">{{ formatTgl(absen.date) }}</td>
+                  <td><span class="badge" :class="statusClass(absen.status)">{{ labelStatus(absen.status) }}</span></td>
+                  <td class="td-time">{{ formatJam(absen.clock_in) }}</td>
+                  <td class="td-time">{{ formatJam(absen.clock_out) }}</td>
                 </tr>
                 <tr v-if="historyAbsen.length === 0">
-                  <td colspan="4" class="text-center py-4 text-muted">Belum ada riwayat absen.</td>
+                  <td colspan="4" class="td-empty">Belum ada riwayat absen.</td>
                 </tr>
               </tbody>
             </table>
           </div>
         </div>
 
-        <div v-if="activeMenu === 'history_logbook'" class="fade-in card">
-          <h2 class="section-title-sm" style="font-size:1.2rem; margin-bottom:20px;">📝 Riwayat Logbook</h2>
-          <div class="table-responsive">
-            <table class="corporate-table-sm">
-              <thead>
-                <tr><th style="width: 120px;">Tanggal</th><th>Isi Logbook</th><th style="width: 80px;" class="text-center">Aksi</th></tr>
-              </thead>
+        <!-- ===== RIWAYAT LOGBOOK ===== -->
+        <div v-if="activeMenu === 'history_logbook'" class="page-fade panel">
+          <div class="panel-header" style="margin-bottom:18px">
+            <span class="panel-label">Riwayat Logbook</span>
+          </div>
+          <div class="tbl-wrap">
+            <table class="dtbl">
+              <thead><tr><th style="width:130px">Tanggal</th><th>Catatan</th><th style="width:70px;text-align:center">Aksi</th></tr></thead>
               <tbody>
                 <tr v-for="log in historyAbsen" :key="'log-'+log.id">
-                  <td class="text-nowrap">{{ formatTgl(log.date) }}</td>
-                  <td class="log-text-cell">{{ log.logbook || 'Belum mengisi logbook' }}</td>
-                  <td class="text-center"><button class="btn-edit-sm" @click="bukaEditLogbook(log)">Edit</button></td>
+                  <td class="td-date">{{ formatTgl(log.date) }}</td>
+                  <td class="td-log">{{ log.logbook || '—' }}</td>
+                  <td style="text-align:center"><button class="btn-edit" @click="bukaEditLogbook(log)">Edit</button></td>
                 </tr>
                 <tr v-if="historyAbsen.length === 0">
-                  <td colspan="3" class="text-center py-4 text-muted">Belum ada data logbook.</td>
+                  <td colspan="3" class="td-empty">Belum ada data logbook.</td>
                 </tr>
               </tbody>
             </table>
           </div>
         </div>
-      </div>
+
+      </div><!-- /content -->
     </main>
 
-    <!-- MODAL: REGISTRASI WAJAH (INTERN BARU) -->
-    <div v-if="showRegistrationModal" class="modal-backdrop z-high" style="background: rgba(0,0,0,0.9);">
-      <div class="modal-card camera-modal" style="margin-top: -50px;">
-        <div style="text-align: center; margin-bottom: 20px;">
-          <h2 style="color: #00529C; margin: 0; font-weight: 900;">Selamat Datang! 🎉</h2>
-          <p style="color: #64748b; font-size: 0.95rem; margin-top: 5px;">
-            Sebagai intern baru, silakan daftarkan wajah Anda ke sistem keamanan <strong>BRIJISENT</strong>.
-          </p>
+    <!-- ============================================================
+         MODAL REGISTRASI WAJAH
+    ============================================================ -->
+    <div v-if="showRegistrationModal" class="overlay overlay--dark">
+      <div class="modal-box modal-box--reg">
+        <div class="reg-head">
+          <span class="reg-badge">BRIJISENT</span>
+          <h2 class="reg-title">Registrasi Biometrik</h2>
+          <p class="reg-sub">Daftarkan wajah Anda untuk mengaktifkan akses sistem kehadiran digital.</p>
         </div>
-        
-        <div class="camera-select-wrapper">
-          <label class="text-sm" style="font-weight: 600;">Pilih Perangkat Kamera:</label>
-          <select v-model="kameraTerpilih" @change="mulaiStreamReg" class="form-input mt-1">
-            <option v-for="cam in listKamera" :key="cam.deviceId" :value="cam.deviceId">{{ cam.label || 'Kamera ' + (listKamera.indexOf(cam) + 1) }}</option>
+
+        <div class="cam-select-wrap">
+          <label class="field-lbl">Pilih Kamera</label>
+          <select v-model="kameraTerpilih" @change="gantiKameraReg" class="field-sel">
+            <option v-for="(cam,i) in listKamera" :key="cam.deviceId" :value="cam.deviceId">{{ cam.label || `Kamera ${i+1}` }}</option>
           </select>
         </div>
-        
-        <div class="video-container" style="border: 4px dashed #00529C; box-shadow: 0 0 20px rgba(0,82,156,0.2);">
-          <video ref="videoElementReg" autoplay playsinline></video>
+
+        <div class="cam-frame">
+          <video ref="videoElementReg" autoplay playsinline muted class="cam-vid"></video>
+          <div class="cam-ovl"><div class="cam-guide"></div></div>
         </div>
-        
-        <div class="modal-actions mt-4" style="flex-direction: column; gap: 8px;">
-          <button 
-            @click="prosesRegistrasiWajah" 
-            class="btn-action btn-masuk" 
-            style="flex:1; padding: 15px; width:100%;"
-            :disabled="isLoadingModels"
-          >
-            <span v-if="isLoadingModels" class="spinner-btn"></span>
-            <span v-else style="font-size: 1.2rem;">📸</span>
-            <span class="btn-text">
-              {{ isLoadingModels ? 'Memuat AI, harap tunggu...' : 'Daftarkan Wajah Sekarang' }}
-            </span>
+
+        <div class="reg-foot">
+          <button @click="prosesRegistrasiWajah" class="btn-capture" :disabled="isLoadingModels">
+            <span v-if="isLoadingModels" class="spin"></span>
+            <svg v-else width="17" height="17" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="2"/><path d="M3 9a2 2 0 012-2h.5L7 5h10l1.5 2H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" stroke="currentColor" stroke-width="1.8"/></svg>
+            {{ isLoadingModels ? 'Memuat Model AI...' : 'Ambil & Daftarkan Wajah' }}
           </button>
-          <p v-if="isLoadingModels" style="text-align:center; font-size:0.78rem; color:#64748b; margin-top:4px;">
-            ⚙️ Model AI sedang dimuat, ini hanya terjadi sekali saat pertama kali...
-          </p>
+          <p v-if="isLoadingModels" class="note-muted">Model AI dimuat di latar belakang — hanya terjadi sekali.</p>
         </div>
       </div>
     </div>
 
-    <!-- MODAL: EDIT LOGBOOK -->
-    <div v-if="showEditLogbookModal" class="modal-backdrop">
-      <div class="modal-card">
-        <h3>Edit Logbook</h3>
-        <p class="text-muted mb-3">Tanggal: {{ editLogbookData.created_at ? editLogbookData.created_at.substring(0, 10) : '-' }}</p>
-        <textarea v-model="editLogbookData.logbook" class="logbook-textarea mb-3" rows="5"></textarea>
-        <div class="modal-actions">
-          <button @click="showEditLogbookModal = false" class="btn-batal">Batal</button>
-          <button @click="showEditLogbookModal = false" class="btn-save">Simpan Perubahan</button>
+    <!-- ============================================================
+         MODAL KAMERA ABSENSI
+    ============================================================ -->
+    <div v-if="showCameraModal" class="overlay">
+      <div class="modal-box">
+        <div class="modal-hdr">
+          <h3 class="modal-ttl">{{ jenisAbsen === 'masuk' ? 'Absen Masuk' : 'Absen Pulang' }}</h3>
+          <button class="modal-x" @click="tutupKamera" aria-label="Tutup">
+            <svg width="17" height="17" fill="none" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
         </div>
-      </div>
-    </div>
-
-    <!-- MODAL: KAMERA ABSENSI -->
-    <div v-if="showCameraModal" class="modal-backdrop z-high">
-      <div class="modal-card camera-modal">
-        <h3>{{ jenisAbsen === 'masuk' ? 'Verifikasi Wajah (Masuk)' : 'Verifikasi Wajah (Keluar)' }}</h3>
-        <div class="camera-select-wrapper mt-3">
-          <label class="text-sm" style="font-weight: 600;">Pilih Perangkat Kamera:</label>
-          <select v-model="kameraTerpilih" @change="gantiKamera" class="form-input mt-1">
-            <option v-for="cam in listKamera" :key="cam.deviceId" :value="cam.deviceId">{{ cam.label || 'Kamera ' + (listKamera.indexOf(cam) + 1) }}</option>
+        <div class="cam-select-wrap" style="margin-top:14px">
+          <label class="field-lbl">Pilih Kamera</label>
+          <select v-model="kameraTerpilih" @change="gantiKamera" class="field-sel">
+            <option v-for="(cam,i) in listKamera" :key="cam.deviceId" :value="cam.deviceId">{{ cam.label || `Kamera ${i+1}` }}</option>
           </select>
         </div>
-        <div class="video-container"><video ref="videoElement" autoplay playsinline></video></div>
-        <div class="modal-actions mt-4">
-          <button @click="tutupKamera" class="btn-batal" style="flex:1">Batal</button>
-          <button @click="prosesAbsenDariKamera" class="btn-masuk" style="flex:2; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; color: white;"><span style="font-size: 1.2rem; margin-right: 5px;">📸</span> Ambil Foto</button>
+        <div class="cam-frame">
+          <video ref="videoElement" autoplay playsinline muted class="cam-vid"></video>
+          <div class="cam-ovl"><div class="cam-guide"></div></div>
+        </div>
+        <div class="modal-foot">
+          <button @click="tutupKamera" class="btn-cancel">Batal</button>
+          <button @click="prosesAbsenDariKamera" class="btn-capture" style="flex:2">
+            <svg width="17" height="17" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="2"/><path d="M3 9a2 2 0 012-2h.5L7 5h10l1.5 2H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" stroke="currentColor" stroke-width="1.8"/></svg>
+            Verifikasi Wajah
+          </button>
         </div>
       </div>
     </div>
 
-    <!-- MODAL: FORM IZIN -->
-    <div v-if="showIzinModal" class="modal-backdrop z-high">
-      <div class="modal-card">
-        <h3>Form Izin Tidak Masuk</h3>
-        <form @submit.prevent="submitIzinForm" class="mt-3">
-          <div class="form-group mb-3">
-            <label class="text-sm">Tanggal Izin:</label>
-            <input type="date" v-model="formIzin.tanggal" required class="form-input mt-1" />
+    <!-- ============================================================
+         MODAL FORM IZIN
+    ============================================================ -->
+    <div v-if="showIzinModal" class="overlay">
+      <div class="modal-box">
+        <div class="modal-hdr">
+          <h3 class="modal-ttl">Pengajuan Izin</h3>
+          <button class="modal-x" @click="showIzinModal = false" aria-label="Tutup">
+            <svg width="17" height="17" fill="none" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <form @submit.prevent="submitIzinForm" class="form-body">
+          <div class="field-grp">
+            <label class="field-lbl">Tanggal Izin <span class="req">*</span></label>
+            <input type="date" v-model="formIzin.tanggal" required class="field-inp" />
           </div>
-          <div class="form-group mb-3">
-            <label class="text-sm">Alasan Izin:</label>
-            <textarea v-model="formIzin.alasan" rows="3" placeholder="Contoh: Sakit, dll" required class="form-input mt-1"></textarea>
+          <div class="field-grp">
+            <label class="field-lbl">Alasan Izin <span class="req">*</span></label>
+            <textarea v-model="formIzin.alasan" rows="3" placeholder="Contoh: Sakit, keperluan keluarga, dll." required class="field-inp"></textarea>
           </div>
-          <div class="form-group mb-4">
-            <label class="text-sm">Link Bukti / Surat (Google Drive):</label>
-            <input type="url" v-model="formIzin.bukti" placeholder="Paste link Google Drive yang sudah di-share..." class="form-input mt-1" />
-            <small class="text-muted" style="display: block; margin-top: 5px; font-size: 0.75rem;">
-              *Pastikan akses link GDrive diatur ke "Anyone with the link"
-            </small>
+          <div class="field-grp">
+            <label class="field-lbl">Link Bukti (Google Drive)</label>
+            <input type="url" v-model="formIzin.bukti" placeholder="https://drive.google.com/..." class="field-inp" />
+            <span class="field-note">Pastikan akses link diatur "Anyone with the link"</span>
           </div>
-          <div class="modal-actions">
-            <button type="button" @click="showIzinModal = false" class="btn-batal flex-1">Batal</button>
-            <button type="submit" class="btn-masuk flex-2" style="border-radius: 8px; border: none; font-weight: bold; cursor: pointer; color: white;">Kirim Pengajuan</button>
+          <div class="modal-foot">
+            <button type="button" @click="showIzinModal = false" class="btn-cancel">Batal</button>
+            <button type="submit" class="btn-capture" style="flex:2">Kirim Pengajuan</button>
           </div>
         </form>
       </div>
@@ -832,170 +826,484 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* --- VARIABEL WARNA --- */
+/* ============================================================
+   DESIGN TOKENS
+============================================================ */
 :root {
-  --bri-blue: #00529C;
-  --bri-orange: #F37021;
-  --bg-color: #F0F4F9; 
-  --text-main: #1E293B;
-  --text-muted: #64748B;
-  --border-color: #E2E8F0;
+  --brand: #003f8a;
+  --brand-mid: #00529C;
+  --brand-light: #e8f1fb;
+  --accent: #F37021;
+  --surface: #ffffff;
+  --bg: #f0f4f9;
+  --border: #e2e8f2;
+  --text: #111827;
+  --text-2: #64748b;
+  --text-3: #9ca3af;
+  --r: 12px;
+  --r-sm: 8px;
+  --sh: 0 1px 2px rgba(0,0,0,.05), 0 4px 16px rgba(0,0,0,.04);
+  --sh-md: 0 8px 30px rgba(0,0,0,.1), 0 2px 6px rgba(0,0,0,.06);
+  --fn: 'Inter','Helvetica Neue',sans-serif;
 }
-* {
-  box-sizing: border-box;
+
+*,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
+button { font-family: var(--fn); }
+textarea, input, select { font-family: var(--fn); }
+
+/* ============================================================
+   APP SHELL
+============================================================ */
+.app-shell {
+  display: flex;
+  height: 100dvh;
+  background: var(--bg);
+  font-family: var(--fn);
+  color: var(--text);
+  overflow: hidden;
 }
 
-.corporate-layout { display: flex; height: 100vh; background-color: var(--bg-color); font-family: 'Inter', sans-serif; overflow: hidden; }
+/* ============================================================
+   SIDEBAR
+============================================================ */
+.sidebar {
+  width: 252px;
+  min-width: 252px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  z-index: 200;
+  flex-shrink: 0;
+  transition: transform .28s cubic-bezier(.4,0,.2,1);
+}
 
-/* SIDEBAR */
-.sidebar { width: 260px; background: white; border-right: 1px solid var(--border-color); display: flex; flex-direction: column; transition: transform 0.3s ease; z-index: 100; }
-.sidebar-header { padding: 25px 20px; border-bottom: 1px solid var(--border-color); }
-.logo-space { font-size: 1.4rem; font-weight: 900; color: #00529C; letter-spacing: 1px; }
-.logo-text { background-color: #00529C; color: #ffffff; padding: 4px 8px; border-radius: 6px; margin-right: 4px; }
-.user-profile { padding: 25px 20px; display: flex; align-items: center; gap: 15px; border-bottom: 1px solid var(--border-color); }
-.avatar { width: 45px; height: 45px; border-radius: 50%; background: var(--bri-blue); color: white; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; font-weight: bold; }
-.greeting { font-size: 0.8rem; color: var(--text-muted); margin: 0; }
-.name { font-size: 1rem; font-weight: 700; color: var(--text-main); margin: 0; }
-.nav-menu { flex: 1; padding: 20px 0; }
-.nav-menu button { width: 100%; text-align: left; padding: 15px 25px; background: none; border: none; border-left: 4px solid transparent; color: var(--text-muted); font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: 0.2s; display: flex; gap: 10px; align-items: center; }
-.nav-menu button:hover { background: #f8fafc; color: var(--bri-blue); }
-.nav-menu button.active { border-left-color: var(--bri-orange); color: var(--bri-blue); background: #f0f7ff; }
-.sidebar-footer { padding: 20px; border-top: 1px solid var(--border-color); }
-.btn-logout { width: 100%; padding: 12px; background: #fff1f0; color: #e74c3c; border: 1px solid #ffccc7; border-radius: 8px; font-weight: 600; cursor: pointer; transition: 0.3s; }
-.btn-logout:hover { background: #e74c3c; color: white; }
+.sidebar-brand {
+  display: flex; align-items: center; gap: 10px;
+  padding: 20px 18px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.brand-logo { width: 32px; height: 32px; object-fit: contain; }
+.brand-name { font-size: 1.1rem; font-weight: 800; color: var(--brand-mid); letter-spacing: .3px; }
+.brand-accent { color: var(--accent); }
 
-/* HEADER & MAIN CONTENT */
-.main-content { flex: 1; display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; }
-.topbar { background: white; padding: 20px 30px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); }
-.menu-toggle { display: none; background: none; border: none; font-size: 1.5rem; color: var(--bri-blue); cursor: pointer; }
-.datetime-display { text-align: right; }
-.date { display: block; font-size: 0.85rem; color: var(--text-muted); }
-.time { font-size: 1.2rem; font-weight: 800; color: var(--bri-blue); }
-.content-wrapper { padding: 30px; margin: 0 auto; max-width: 100%; width: 100%; }
-.grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; } 
-.right-column { display: flex; flex-direction: column; gap: 25px; }
+.sidebar-user {
+  display: flex; align-items: center; gap: 11px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--brand-light);
+}
+.user-avatar {
+  width: 38px; height: 38px; border-radius: 50%;
+  background: var(--brand-mid); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .95rem; font-weight: 800; flex-shrink: 0;
+}
+.user-meta { display: flex; flex-direction: column; min-width: 0; }
+.user-greeting { font-size: .68rem; color: var(--text-2); font-weight: 500; }
+.user-name { font-size: .875rem; font-weight: 700; color: var(--brand); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* CARD & BANNER STYLES */
-.card { background: white; border-radius: 16px; padding: 25px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); border: 1px solid rgba(226, 232, 240, 0.8); transition: 0.2s ease; }
-.card-title { font-size: 1.1rem; font-weight: 700; color: var(--text-main); margin-bottom: 20px; border-bottom: 2px solid #f0f2f5; padding-bottom: 10px; }
+.sidebar-nav { flex: 1; padding: 12px 10px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+.nav-item {
+  display: flex; align-items: center; gap: 9px;
+  padding: 10px 12px; width: 100%;
+  border: none; background: transparent; border-radius: var(--r-sm);
+  color: var(--text-2); font-size: .85rem; font-weight: 600;
+  cursor: pointer; text-align: left;
+  transition: background .15s, color .15s;
+}
+.nav-item:hover { background: var(--bg); color: var(--brand-mid); }
+.nav-item--active { background: var(--brand-light); color: var(--brand-mid); }
+.nav-icon { display: flex; align-items: center; color: inherit; flex-shrink: 0; }
 
-/* STATUS BANNER */
-.status-banner { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; border-radius: 12px; text-align: center; transition: all 0.3s ease; }
-.status-label { font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; opacity: 0.85; margin-bottom: 5px; }
-.status-value { font-size: 1.5rem; font-weight: 900; letter-spacing: 0.5px; }
+.sidebar-footer { padding: 14px; border-top: 1px solid var(--border); }
+.btn-logout {
+  width: 100%; padding: 9px 13px;
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  background: #fff5f5; color: #dc2626;
+  border: 1px solid #fecaca; border-radius: var(--r-sm);
+  font-size: .82rem; font-weight: 600; cursor: pointer;
+  transition: background .15s;
+}
+.btn-logout:hover { background: #fee2e2; }
 
-/* BANNER HUMAN-FRIENDLY */
-.greeting-banner { display: flex; align-items: center; gap: 20px; padding: 25px; border-radius: 16px; margin-bottom: 20px; animation: fadeIn 0.5s ease; }
-.greeting-banner.holiday { background: linear-gradient(135deg, #fdfbfb 0%, #ebedee 100%); border: 1px solid #e2e8f0; }
-.greeting-banner.pulang { background: linear-gradient(135deg, #f0f7ff 0%, #e0efff 100%); border: 1px solid #bae6fd; }
-.greeting-banner.izin { background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border: 1px solid #fde68a; box-shadow: 0 4px 15px rgba(245, 158, 11, 0.1); }
-.greeting-icon { font-size: 2.5rem; background: white; padding: 15px; border-radius: 50%; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-.greeting-banner.izin .greeting-icon { background: #fef3c7; }
-.greeting-text h4 { margin: 0 0 5px 0; font-size: 1.2rem; color: #1e293b; font-weight: 800; }
-.greeting-banner.izin h4 { color: #92400e; }
-.greeting-text p { margin: 0; font-size: 0.9rem; color: #64748b; line-height: 1.5; }
-.greeting-banner.izin p { color: #b45309; font-weight: 500; }
+/* Mobile / Tablet */
+@media (max-width: 1024px) {
+  .sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0;
+    transform: translateX(-100%);
+    box-shadow: var(--sh-md);
+  }
+  .sidebar--open { transform: translateX(0); }
+}
+.sidebar-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.42);
+  z-index: 199;
+  backdrop-filter: blur(3px);
+  display: none;
+}
+@media (max-width: 1024px) { .sidebar-overlay { display: block; } }
 
-/* ACTION BUTTONS */
-.action-buttons-vertical { display: flex !important; flex-direction: column !important; gap: 16px !important; }
-.btn-action { width: 100% !important; padding: 14px 20px !important; border: none !important; border-radius: 12px !important; font-weight: 700 !important; font-size: 1rem !important; cursor: pointer !important; display: flex !important; align-items: center !important; justify-content: center !important; gap: 10px !important; box-shadow: 0 4px 10px rgba(0,0,0,0.1) !important; transition: all 0.3s ease !important; }
-.btn-action:active:not(:disabled) { transform: scale(0.97) !important; }
-.btn-masuk { background: linear-gradient(135deg, #00529C, #0076E3) !important; color: #ffffff !important; }
-.btn-pulang { background: linear-gradient(135deg, #F37021, #FF8C42) !important; color: #ffffff !important; }
-.btn-keluar-sementara { background: linear-gradient(135deg, #F59E0B, #FBBF24) !important; color: #ffffff !important; }
-.btn-kembali { background: linear-gradient(135deg, #10B981, #34D399) !important; color: #ffffff !important; }
-.btn-izin { background: #ffffff !important; color: #00529C !important; border: 2px solid #00529C !important; }
-.btn-disabled, .btn-action:disabled { background: #E2E8F0 !important; color: #94A3B8 !important; cursor: not-allowed !important; box-shadow: none !important; border: 1px solid #CBD5E1 !important; }
-.btn-text { color: inherit !important; }
+/* ============================================================
+   MAIN
+============================================================ */
+.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
 
-/* LOGBOOK */
-.logbook-card { padding: 0; overflow: hidden; }
-.card-header-custom { padding: 20px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
-.logbook-body { padding: 20px; }
-.logbook-hint { font-size: 0.85rem; color: #64748b; margin-bottom: 12px; }
-.logbook-textarea { width: 100%; padding: 15px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 0.95rem; transition: all 0.3s ease; resize: vertical; background-color: #fdfdfd; }
-.logbook-textarea:focus { outline: none; border-color: #00529C; background-color: #fff; box-shadow: 0 0 0 4px rgba(0, 82, 156, 0.1); }
-.btn-save-logbook { margin-top: 15px; width: 100%; padding: 14px; background: linear-gradient(135deg, #00529C 0%, #003a6e 100%); color: white; border: none; border-radius: 10px; font-weight: 600; display: flex; justify-content: center; align-items: center; gap: 10px; transition: transform 0.2s; }
-.btn-save-logbook:hover:not(:disabled) { transform: translateY(-2px); filter: brightness(1.1); }
-.btn-save-logbook:disabled { background: #cbd5e1; cursor: not-allowed; }
-.status-indicator { font-size: 0.75rem; padding: 4px 10px; border-radius: 20px; font-weight: 600; }
-.status-filled { background: #dcfce7; color: #166534; }
-.status-empty { background: #fee2e2; color: #991b1b; }
-.text-warning-sm { font-size: 0.75rem; color: #ef4444; text-align: center; margin-top: 10px; }
-
-/* TABLE & HISTORY */
-.table-responsive { width: 100%; overflow-x: auto; }
-.corporate-table-sm { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-.corporate-table-sm th { background: #f1f5f9; padding: 12px 16px; text-align: left; color: #64748b; font-weight: 600; border-bottom: 2px solid #e2e8f0; }
-.corporate-table-sm td { padding: 12px 16px; border-bottom: 1px solid #f1f5f9; }
-.time-cell { font-family: 'Monaco', monospace; font-weight: 600; color: #00529C; }
-.badge-status { padding: 4px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 700; }
-.bg-success-light { background: #dcfce7; color: #166534; }
-.bg-warning-light { background: #fef3c7; color: #92400e; }
-.bg-danger-light { background: #fee2e2; color: #991b1b; }
-.log-text-cell { max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #475569; }
-.btn-edit-sm { background: transparent; border: 1px solid #00529C; color: #00529C; padding: 4px 12px; border-radius: 6px; font-size: 0.75rem; cursor: pointer; transition: 0.2s; font-weight: 600; }
-.btn-edit-sm:hover { background: #00529C; color: white; }
-.btn-download { background-color: #00529C; color: white; border: none; padding: 8px 16px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: 0.3s; }
-.btn-download:hover { background-color: #003a6e; transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
-
-/* MODALS & FORMS */
-.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; backdrop-filter: blur(4px); }
-.z-high { z-index: 2000; }
-.modal-card { background: white; padding: 30px; border-radius: 16px; width: 90%; max-width: 450px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); }
-.video-container { width: 100%; aspect-ratio: 4/3; background: #000; border-radius: 12px; overflow: hidden; margin-top: 15px; }
-.video-container video { width: 100%; height: 100%; object-fit: cover; }
-.form-input { width: 100%; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; font-family: inherit; margin-top: 5px; box-sizing: border-box; }
-.modal-actions { display: flex; gap: 10px; margin-top: 20px; }
-.btn-batal { padding: 12px; background: #F1F5F9; border: 1px solid #CBD5E1; color: #475569; border-radius: 10px; font-weight: bold; cursor: pointer; transition: 0.2s; flex: 1; }
-.btn-batal:hover { background: #E2E8F0; }
-
-/* SPINNER BUTTON */
-.spinner-btn {
-  display: inline-block;
-  width: 18px; height: 18px;
-  border: 3px solid rgba(255,255,255,0.4);
-  border-top-color: #ffffff;
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
+/* TOPBAR */
+.topbar {
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 22px; height: 58px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
-@keyframes spin { to { transform: rotate(360deg); } }
+.topbar-toggle {
+  display: flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px;
+  border: none; background: var(--bg); border-radius: var(--r-sm);
+  color: var(--text-2); cursor: pointer; flex-shrink: 0;
+  transition: background .15s;
+}
+.topbar-toggle:hover { background: var(--border); }
+.topbar-datetime { margin-left: auto; text-align: right; }
+.topbar-date { display: block; font-size: .72rem; color: var(--text-2); }
+.topbar-time { font-size: .98rem; font-weight: 800; color: var(--brand-mid); line-height: 1.2; }
+.topbar-time em { font-style: normal; font-size: .7rem; font-weight: 500; color: var(--text-3); }
 
-/* UTILITIES */
-.flex-1 { flex: 1; } .flex-2 { flex: 2; }
-.text-muted { color: var(--text-muted); }
-.fade-in { animation: fadeIn 0.4s ease; }
-@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+/* CONTENT */
+.content { flex: 1; overflow-y: auto; padding: 22px; }
+.page-fade { animation: pFade .3s ease both; }
+@keyframes pFade { from { opacity:0; transform:translateY(6px) } to { opacity:1; transform:none } }
 
-/* --- RESPONSIVE MOBILE --- */
-@media (max-width: 768px) {
-  .sidebar { position: fixed; height: 100vh; transform: translateX(-100%); width: 250px; }
-  .sidebar.open { transform: translateX(0); }
-  .sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 99; backdrop-filter: blur(2px); }
-  .menu-toggle { display: block; }
-  
-  .topbar { padding: 15px 20px; }
-  .time { font-size: 1rem; }
-  .date { font-size: 0.75rem; }
-  .content-wrapper { padding: 15px; }
-  .grid-container { grid-template-columns: 1fr; gap: 15px; } 
-  .card { padding: 18px; }
-  
-  .greeting-banner { flex-direction: column; text-align: center; gap: 10px; padding: 20px; }
-  .greeting-icon { font-size: 2rem; padding: 12px; }
-  
-  .btn-action { padding: 12px 15px !important; font-size: 0.95rem !important; }
-  
-  .d-flex { flex-direction: column; align-items: flex-start !important; gap: 10px; }
-  .btn-download { width: 100%; text-align: center; padding: 10px; }
-  .corporate-table-sm th, .corporate-table-sm td { padding: 10px; font-size: 0.8rem; }
-  .log-text-cell { max-width: 150px; } 
-  
-  .modal-card { padding: 20px; width: 95%; }
-  .modal-actions { flex-direction: column; gap: 8px; }
-  .btn-batal, .btn-masuk, .btn-save { width: 100%; margin: 0; }
-  
-  .video-container { margin-top: 10px; }
+/* ============================================================
+   PANELS
+============================================================ */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 22px;
+  box-shadow: var(--sh);
+}
+
+.panel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-bottom: 18px; flex-wrap: wrap;
+}
+.panel-label {
+  font-size: .68rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .08em; color: var(--text-3);
+}
+
+/* STATUS CHIP */
+.status-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 11px; border: 1px solid; border-radius: 20px;
+  font-size: .75rem; font-weight: 700;
+}
+.status-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  animation: blink 2.4s ease infinite;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+/* DASHBOARD GRID */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin-top: 0;
+}
+/* iPad (≤1024px) dan bawah: susun ke bawah */
+@media (max-width: 1024px) {
+  .dashboard-grid { grid-template-columns: 1fr; }
+}
+
+/* GREETING CARD */
+.greeting-card {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 16px 18px;
+  border-radius: var(--r); border-left: 4px solid;
+  margin-bottom: 18px;
+  animation: pFade .3s ease;
+}
+.greeting--holiday { background: #f0fdf4; border-color: #22c55e; }
+.greeting--izin { background: #fffbeb; border-color: #f59e0b; }
+.greeting--pulang { background: var(--brand-light); border-color: var(--brand-mid); }
+.greeting-icon-wrap { font-size: 1.5rem; line-height: 1; flex-shrink: 0; margin-top: 2px; }
+.greeting-title { font-size: .9rem; font-weight: 700; color: var(--text); }
+.greeting-sub { font-size: .8rem; color: var(--text-2); margin-top: 3px; line-height: 1.5; }
+
+/* TIMELINE */
+.timeline {
+  display: flex; align-items: center;
+  padding: 12px 14px; margin-bottom: 18px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  gap: 0;
+}
+.tl-item { display: flex; align-items: center; gap: 9px; flex: 1; }
+.tl-rule { width: 32px; height: 1px; background: var(--border); flex-shrink: 0; }
+.tl-dot {
+  width: 11px; height: 11px; border-radius: 50%;
+  border: 2px solid var(--border); background: var(--surface);
+  flex-shrink: 0; transition: border-color .3s, background .3s;
+}
+.tl-dot--on { border-color: var(--brand-mid); background: var(--brand-mid); }
+.tl-text { display: flex; flex-direction: column; }
+.tl-lbl { font-size: .66rem; color: var(--text-3); font-weight: 600; }
+.tl-val { font-size: .9rem; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* ============================================================
+   ACTION BUTTONS
+============================================================ */
+.action-stack { display: flex; flex-direction: column; gap: 9px; }
+.btn-act {
+  display: flex; align-items: center; gap: 9px;
+  width: 100%; padding: 12px 16px;
+  border: none; border-radius: var(--r-sm);
+  font-size: .875rem; font-weight: 700; cursor: pointer;
+  transition: filter .15s, transform .1s;
+}
+.btn-act:active:not(:disabled) { transform: scale(.98); }
+.btn-act:disabled { background: #f1f5f9 !important; color: #94a3b8 !important; border-color: transparent !important; cursor: not-allowed !important; filter: none !important; }
+
+.btn-act--primary { background: var(--brand-mid); color: #fff; }
+.btn-act--primary:hover:not(:disabled) { filter: brightness(1.08); }
+.btn-act--orange { background: var(--accent); color: #fff; }
+.btn-act--orange:hover:not(:disabled) { filter: brightness(1.08); }
+.btn-act--green { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+.btn-act--green:hover:not(:disabled) { background: #dcfce7; }
+.btn-act--ghost { background: var(--bg); color: var(--brand-mid); border: 1.5px solid var(--brand-mid); }
+.btn-act--ghost:hover:not(:disabled) { background: var(--brand-light); }
+
+/* SAVE */
+.btn-save {
+  width: 100%; margin-top: 11px;
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 11px;
+  background: var(--brand-mid); color: #fff;
+  border: none; border-radius: var(--r-sm);
+  font-size: .85rem; font-weight: 700; cursor: pointer;
+  transition: filter .15s;
+}
+.btn-save:hover:not(:disabled) { filter: brightness(1.08); }
+.btn-save:disabled { background: #e2e8f0; color: #94a3b8; cursor: not-allowed; }
+
+/* ============================================================
+   LOGBOOK
+============================================================ */
+.lb-chip {
+  font-size: .7rem; font-weight: 700; padding: 3px 10px; border-radius: 20px;
+}
+.lb-chip--filled { background: #dcfce7; color: #166534; }
+.lb-chip--empty  { background: #fee2e2; color: #991b1b; }
+.lb-hint { font-size: .8rem; color: var(--text-2); margin-bottom: 9px; line-height: 1.5; }
+.lb-area {
+  width: 100%; padding: 11px 13px;
+  border: 1.5px solid var(--border); border-radius: var(--r-sm);
+  font-size: .85rem; resize: vertical; background: var(--bg);
+  color: var(--text); line-height: 1.6;
+  transition: border-color .15s, box-shadow .15s;
+}
+.lb-area:focus { outline: none; border-color: var(--brand-mid); box-shadow: 0 0 0 3px rgba(0,82,156,.1); background: #fff; }
+.lb-area:disabled { opacity: .55; cursor: not-allowed; }
+.hint-muted { font-size: .72rem; color: var(--text-3); margin-top: 7px; text-align: center; }
+
+/* ============================================================
+   TABLE
+============================================================ */
+.tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.dtbl { width: 100%; border-collapse: collapse; font-size: .84rem; }
+.dtbl th {
+  background: var(--bg); padding: 9px 13px;
+  text-align: left; color: var(--text-2);
+  font-size: .68rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .06em;
+  border-bottom: 2px solid var(--border);
+  white-space: nowrap;
+}
+.dtbl td { padding: 11px 13px; border-bottom: 1px solid var(--border); }
+.dtbl tbody tr:last-child td { border-bottom: none; }
+.dtbl tbody tr:hover { background: var(--bg); }
+.td-date { font-size: .8rem; color: var(--text-2); white-space: nowrap; }
+.td-time { font-family: 'SF Mono','Monaco',monospace; font-weight: 700; color: var(--brand-mid); white-space: nowrap; }
+.td-log { max-width: 280px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
+.td-empty { text-align: center; padding: 36px; color: var(--text-3); font-size: .85rem; }
+
+.badge { display: inline-block; padding: 3px 9px; border-radius: 20px; font-size: .7rem; font-weight: 700; }
+.badge-success { background: #dcfce7; color: #166534; }
+.badge-warning { background: #fef3c7; color: #92400e; }
+.badge-danger  { background: #fee2e2; color: #991b1b; }
+
+.btn-dl {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 13px;
+  background: var(--brand-mid); color: #fff;
+  border: none; border-radius: var(--r-sm);
+  font-size: .8rem; font-weight: 600; cursor: pointer;
+  transition: filter .15s;
+}
+.btn-dl:hover { filter: brightness(1.1); }
+.btn-edit {
+  padding: 4px 11px;
+  border: 1px solid var(--brand-mid); color: var(--brand-mid);
+  background: transparent; border-radius: 6px;
+  font-size: .72rem; font-weight: 600; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.btn-edit:hover { background: var(--brand-mid); color: #fff; }
+
+/* ============================================================
+   MODALS / OVERLAYS
+============================================================ */
+.overlay {
+  position: fixed; inset: 0;
+  background: rgba(15,23,42,.52);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 500; backdrop-filter: blur(6px);
+  padding: 16px;
+}
+.overlay--dark { background: rgba(5,10,20,.88); }
+
+.modal-box {
+  background: var(--surface);
+  border-radius: 16px;
+  width: 100%; max-width: 410px;
+  box-shadow: var(--sh-md);
+  overflow: hidden;
+  animation: mIn .22s cubic-bezier(.34,1.56,.64,1);
+}
+@keyframes mIn { from { opacity:0; transform:scale(.93) translateY(10px) } to { opacity:1; transform:none } }
+.modal-box--reg { max-width: 430px; }
+
+.modal-hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 20px 0;
+}
+.modal-ttl { font-size: .95rem; font-weight: 700; }
+.modal-x {
+  width: 30px; height: 30px; border-radius: 50%;
+  border: none; background: var(--bg);
+  color: var(--text-2); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .15s;
+}
+.modal-x:hover { background: var(--border); }
+.modal-foot { display: flex; gap: 9px; padding: 0 20px 20px; }
+
+/* REGISTRATION HEADER */
+.reg-head { text-align: center; padding: 26px 20px 14px; }
+.reg-badge {
+  display: inline-block; padding: 3px 11px;
+  background: var(--brand-mid); color: #fff;
+  border-radius: 5px; font-size: .66rem; font-weight: 800;
+  letter-spacing: .1em; margin-bottom: 11px;
+}
+.reg-title { font-size: 1.15rem; font-weight: 800; }
+.reg-sub { font-size: .8rem; color: var(--text-2); margin-top: 5px; line-height: 1.5; }
+.reg-foot { padding: 0 20px 8px; }
+
+/* CAMERA */
+.cam-select-wrap { padding: 0 20px 10px; }
+.field-lbl { display: block; font-size: .72rem; font-weight: 700; color: var(--text-2); margin-bottom: 5px; }
+.req { color: #dc2626; }
+.field-sel, .field-inp {
+  width: 100%; padding: 8px 11px;
+  border: 1.5px solid var(--border); border-radius: var(--r-sm);
+  font-size: .84rem; color: var(--text); background: var(--bg);
+  outline: none; transition: border-color .15s;
+}
+.field-sel:focus, .field-inp:focus { border-color: var(--brand-mid); box-shadow: 0 0 0 3px rgba(0,82,156,.1); }
+.field-note { display: block; font-size: .7rem; color: var(--text-3); margin-top: 4px; }
+.field-grp { margin-bottom: 12px; padding: 0 20px; }
+textarea.field-inp { resize: vertical; line-height: 1.5; }
+.form-body { margin-top: 14px; }
+
+.cam-frame {
+  position: relative;
+  margin: 0 20px 14px;
+  border-radius: 10px; overflow: hidden;
+  aspect-ratio: 4/3;
+  background: #0a0f1a;
+  border: 1.5px solid var(--border);
+}
+.cam-vid { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cam-ovl {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+.cam-guide {
+  width: 52%; aspect-ratio: 3/4;
+  border: 2px solid rgba(255,255,255,.55);
+  border-radius: 50% 50% 50% 50% / 45% 45% 55% 55%;
+  box-shadow: 0 0 0 9999px rgba(0,0,0,.32);
+}
+
+.btn-capture {
+  display: flex; align-items: center; justify-content: center; gap: 9px;
+  width: 100%;
+  padding: 12px;
+  background: var(--brand-mid); color: #fff;
+  border: none; border-radius: var(--r-sm);
+  font-size: .875rem; font-weight: 700; cursor: pointer;
+  transition: filter .15s; margin-bottom: 4px;
+}
+.btn-capture:hover:not(:disabled) { filter: brightness(1.08); }
+.btn-capture:disabled { background: #e2e8f0; color: #94a3b8; cursor: not-allowed; }
+.btn-cancel {
+  flex: 1; padding: 11px;
+  background: var(--bg); color: var(--text-2);
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  font-size: .84rem; font-weight: 600; cursor: pointer;
+  transition: background .15s;
+}
+.btn-cancel:hover { background: var(--border); }
+.note-muted { text-align: center; font-size: .7rem; color: var(--text-3); padding-bottom: 10px; }
+
+/* SPINNER */
+.spin {
+  display: inline-block; width: 15px; height: 15px;
+  border: 2px solid rgba(255,255,255,.35);
+  border-top-color: #fff; border-radius: 50%;
+  animation: rot .7s linear infinite; flex-shrink: 0;
+}
+@keyframes rot { to { transform: rotate(360deg); } }
+
+/* ============================================================
+   RESPONSIVE BREAKPOINTS
+============================================================ */
+/* Tablet portrait (iPad 11" = ~820px) */
+@media (max-width: 1024px) {
+  .content { padding: 16px; }
+  .panel { padding: 18px; }
+  .topbar { padding: 0 16px; }
+}
+
+/* Mobile */
+@media (max-width: 640px) {
+  .content { padding: 12px; }
+  .panel { padding: 14px; }
+  .topbar { height: 50px; padding: 0 12px; }
+  .topbar-date { display: none; }
+  .topbar-time { font-size: .88rem; }
+  .dashboard-grid { gap: 12px; }
+  .cam-frame { margin: 0 14px 12px; }
+  .cam-select-wrap { padding: 0 14px 8px; }
+  .reg-foot { padding: 0 14px 8px; }
+  .reg-head { padding: 18px 14px 10px; }
+  .field-grp { padding: 0 14px; }
+  .modal-hdr { padding: 14px 14px 0; }
+  .modal-foot { padding: 0 14px 14px; }
+  .timeline { gap: 4px; padding: 10px 11px; }
+  .tl-rule { width: 16px; }
+  .tl-val { font-size: .82rem; }
+}
+
+@media (max-width: 360px) {
+  .status-chip { font-size: .68rem; padding: 3px 8px; }
+  .btn-act { font-size: .8rem; padding: 10px 12px; }
 }
 </style>
