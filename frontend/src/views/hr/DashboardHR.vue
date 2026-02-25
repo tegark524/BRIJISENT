@@ -510,6 +510,45 @@ const saveAttendance = async () => {
         </div>
       </div>
     </div>
+    <div v-if="showEditAttendanceModal" class="modal-overlay z-high">
+  <div class="modal-card fade-in">
+    <div class="modal-header">
+      <h3 style="color: #00529C; margin: 0;">Edit Absensi</h3>
+      <button @click="showEditAttendanceModal = false" class="close-x">×</button>
+    </div>
+    <div class="modal-body">
+      <div style="background: #f1f5f9; padding: 10px; border-radius: 8px; margin-bottom: 20px;">
+        <strong>{{ formAttendance.nama }}</strong><br>
+        <small class="text-muted">Tanggal: {{ formatTgl(formAttendance.date) }}</small>
+      </div>
+
+      <div class="form-group">
+        <label>Status Kehadiran</label>
+        <select v-model="formAttendance.status" class="form-input">
+          <option value="present">Hadir (Present)</option>
+          <option value="permit">Izin (Permit)</option>
+          <option value="absent">Tidak Hadir (Absent)</option>
+        </select>
+      </div>
+
+      <div v-if="formAttendance.status === 'present'" style="display: flex; gap: 15px;">
+        <div class="form-group" style="flex: 1;">
+          <label>Jam Masuk</label>
+          <input type="time" v-model="formAttendance.clock_in" class="form-input">
+        </div>
+        <div class="form-group" style="flex: 1;">
+          <label>Jam Keluar</label>
+          <input type="time" v-model="formAttendance.clock_out" class="form-input">
+        </div>
+      </div>
+      <small v-if="formAttendance.status === 'present'" class="text-muted" style="font-size: 0.75rem;">*Kosongkan jam keluar jika intern belum waktunya pulang.</small>
+    </div>
+    <div class="modal-footer">
+      <button @click="saveAttendance" class="btn-confirm">SIMPAN DATA</button>
+      <button @click="showEditAttendanceModal = false" class="btn-cancel">BATAL</button>
+    </div>
+  </div>
+</div>
   </div>
 </template>
 
