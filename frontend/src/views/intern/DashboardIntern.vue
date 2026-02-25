@@ -525,7 +525,7 @@ onUnmounted(() => {
                 v-model="logbookText"
                 class="lb-area"
                 rows="7"
-                :placeholder="todayAttendance?.status === 'permit' ? 'Sedang izin — tidak perlu mengisi logbook.' : 'Contoh: Meeting tim, Input Data...'"
+                :placeholder="todayAttendance?.status === 'permit' ? 'Sedang izin — tidak perlu mengisi logbook.' : 'Contoh: Meeting tim, debugging API, review kode...'"
                 :disabled="!todayAttendance?.id || todayAttendance?.status === 'permit'"
               ></textarea>
               <button @click="simpanLogbook" class="btn-save-lb" :disabled="!todayAttendance?.id || !logbookText.trim() || todayAttendance?.status === 'permit'">
@@ -1090,7 +1090,7 @@ textarea.finp { resize: vertical; line-height: 1.5; }
   background: #0a0f1a;
   border: 1.5px solid #e2e8f0;
 }
-.cam-vid { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cam-vid { width: 100%; height: 100%; object-fit: cover; display: block; transform: scaleX(-1); }
 .cam-guide-ring {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
