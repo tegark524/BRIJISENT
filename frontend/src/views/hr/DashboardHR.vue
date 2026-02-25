@@ -218,7 +218,7 @@ onUnmounted(() => { clearInterval(timer); clearInterval(refreshTimer); })
   <div class="app-layout">
     <aside class="sidebar">
       <div class="sidebar-header" style="display: flex; align-items: center; gap: 10px; padding: 20px;">
-  <img src="/logo.png" alt="Logo" style="width: 40px; height: 40px; object-fit: contain;">
+  <img src="/LOGO.png" alt="Logo" style="width: 40px; height: 40px; object-fit: contain;">
   <div class="logo-space" style="border: none; padding: 0;">BRIJISENT</div>
 </div>
       <nav class="side-nav">
