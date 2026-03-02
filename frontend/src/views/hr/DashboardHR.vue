@@ -435,10 +435,6 @@ onUnmounted(() => {
               <div class="sc-icon-wrap sc-iw-purple"><svg width="20" height="20" fill="none" viewBox="0 0 24 24"><path d="M9 12h6m-3-3v6m9-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
               <div class="sc-body"><span class="sc-label">Izin</span><span class="sc-num">{{ summary.permit_today }}</span></div>
             </div>
-            <div class="stat-card sc-red">
-              <div class="sc-icon-wrap sc-iw-red"><svg width="20" height="20" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.8"/><path d="M15 9l-6 6M9 9l6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
-              <div class="sc-body"><span class="sc-label">Tidak Hadir</span><span class="sc-num">{{ summary.absent_today }}</span></div>
-            </div>
           </div>
 
           <!-- CHARTS + REALTIME ROW -->
