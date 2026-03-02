@@ -852,7 +852,7 @@ button, input, textarea, select { font-family: 'Inter', 'Helvetica Neue', Arial,
 ============================================================ */
 .main-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
 .topbar { display: flex; align-items: center; gap: 12px; padding: 0 22px; height: 58px; background: #ffffff; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
-.hamburger { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: none; background: #f0f4f9; border-radius: 8px; color: #64748b; cursor: pointer; flex-shrink: 0; transition: background .15s; }
+.hamburger { display: none;; align-items: center; justify-content: center; width: 36px; height: 36px; border: none; background: #f0f4f9; border-radius: 8px; color: #64748b; cursor: pointer; flex-shrink: 0; transition: background .15s; }
 .hamburger:hover { background: #e2e8f0; }
 .topbar-center { flex: 1; padding-left: 4px; }
 .tb-page { font-size: .95rem; font-weight: 700; color: #111827; }
@@ -1094,5 +1094,8 @@ input:checked + .toggle-track::before { transform: translateX(20px); }
   .cal-hol-desc { display: none; }
   .donut-wrap { flex-direction: column; align-items: flex-start; gap: 12px; }
   .donut-svg { width: 100px; height: 100px; }
+  .hamburger {
+    display: flex; /* Munculkan burger menu di layar <= 1024px */
+  }
 }
 </style>
