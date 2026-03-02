@@ -73,7 +73,7 @@ const isHariKerja = computed(() => {
 // KONSTANTA BATAS JAM KERJA (dalam menit)
 // ==========================================
 const JAM_BUKA      = 6 * 60 + 30   // 06:30 — absensi mulai dibuka
-const JAM_TUTUP_IN  = 17 * 60        // 17:00 — batas terakhir absen masuk
+const JAM_TUTUP_IN  = 10 * 60        // 17:00 — batas terakhir absen masuk
 const JAM_TUTUP_OUT = 18 * 60        // 18:00 — batas terakhir absen pulang
 
 // ==========================================
@@ -110,7 +110,7 @@ const lockMessage = computed(() => {
   if (serverMinutes.value >= JAM_TUTUP_OUT)
     return { type: 'closed', icon: '🔒', title: 'Absensi Ditutup', text: 'Waktu absensi telah berakhir (setelah 18.00 WIB)' }
   if (serverMinutes.value >= JAM_TUTUP_IN && !todayAttendance.value?.clock_in)
-    return { type: 'late', icon: '⏰', title: 'Terlambat', text: 'Absen masuk ditutup sejak 17.00 WIB. Hubungi HR jika ada keperluan.' }
+    return { type: 'late', icon: '⏰', title: 'Terlambat', text: 'Absen masuk ditutup sejak 10.00 WIB. Hubungi HR jika ada keperluan.' }
   return null
 })
 
