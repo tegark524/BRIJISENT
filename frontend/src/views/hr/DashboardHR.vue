@@ -103,16 +103,23 @@ const donutSegments = computed(() => {
   const iz = summary.value.permit_today || 0
   const a = summary.value.absent_today || 0
   const total = p + l + iz + a || 1
+  
   const items = [
     { label: 'Hadir', value: p, pct: p/total*100, color: '#10b981' },
     { label: 'Terlambat', value: l, pct: l/total*100, color: '#f59e0b' },
     { label: 'Izin', value: iz, pct: iz/total*100, color: '#7c3aed' },
     { label: 'Tidak Hadir', value: a, pct: a/total*100, color: '#ef4444' },
   ]
+  
   const cx=60, cy=60, r=50, ri=30
   let cum = -90
+  
   return items.filter(d => d.value > 0).map(d => {
-    const sweep = d.pct/100*360
+    let sweep = d.pct/100*360;
+    
+    // BUG FIX: SVG Arc tidak bisa menggambar persis 360 derajat penuh, kurangi sedikit
+    if (sweep >= 360) sweep = 359.999;
+    
     const a1 = cum*Math.PI/180, a2 = (cum+sweep)*Math.PI/180
     const x1o=cx+r*Math.cos(a1), y1o=cy+r*Math.sin(a1)
     const x2o=cx+r*Math.cos(a2), y2o=cy+r*Math.sin(a2)
@@ -121,6 +128,7 @@ const donutSegments = computed(() => {
     const lg = sweep > 180 ? 1 : 0
     const path = `M${x1o},${y1o} A${r},${r} 0 ${lg},1 ${x2o},${y2o} L${x1i},${y1i} A${ri},${ri} 0 ${lg},0 ${x2i},${y2i} Z`
     cum += sweep
+    
     return { ...d, path, pctLabel: Math.round(d.pct) }
   })
 })
