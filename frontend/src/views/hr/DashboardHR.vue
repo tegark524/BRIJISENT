@@ -95,7 +95,7 @@ const fetchData = async () => {
 }
 
 // ==========================================
-// COMPUTED: DONUT CHART DATA
+// COMPUTED: DONUT CHART DATA (JUMBO SIZE & FIX 360 BUG)
 // ==========================================
 const donutSegments = computed(() => {
   const p = summary.value.present_today || 0
@@ -111,7 +111,8 @@ const donutSegments = computed(() => {
     { label: 'Tidak Hadir', value: a, pct: a/total*100, color: '#ef4444' },
   ]
   
-  const cx=60, cy=60, r=50, ri=30
+  // Dibesarkan untuk viewbox 300x300
+  const cx=150, cy=150, r=120, ri=70
   let cum = -90
   
   return items.filter(d => d.value > 0).map(d => {
@@ -336,12 +337,10 @@ onUnmounted(() => {
 <template>
   <div class="shell">
 
-    <!-- Overlay mobile/tablet -->
     <transition name="fade-overlay">
       <div v-if="isSidebarOpen && (isMobile || isTablet)" class="overlay-dim" @click="toggleSidebar"></div>
     </transition>
 
-    <!-- ===== SIDEBAR ===== -->
     <aside class="sidebar" :class="{ 'sidebar-visible': isSidebarOpen }">
       <div class="sb-brand">
         <img src="/LOGO.png" alt="BRI" class="sb-logo" onerror="this.style.display='none'" />
@@ -372,7 +371,7 @@ onUnmounted(() => {
           Manajemen HR
         </button>
         <button class="nav-btn" :class="{ 'nav-btn-active': activeMenu === 'settings' }" @click="switchMenu('settings')">
-          <svg class="nav-ico" fill="none" viewBox="0 0 24 24"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="currentColor" stroke-width="1.8"/></svg>
+          <svg class="nav-ico" fill="none" viewBox="0 0 24 24"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="currentColor" stroke-width="1.8"/></svg>
           Pengaturan
         </button>
       </nav>
@@ -384,10 +383,8 @@ onUnmounted(() => {
       </div>
     </aside>
 
-    <!-- ===== MAIN ===== -->
     <main class="main-area">
 
-      <!-- TOPBAR -->
       <header class="topbar">
         <button class="hamburger" @click="toggleSidebar">
           <svg width="20" height="20" fill="none" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -403,12 +400,8 @@ onUnmounted(() => {
 
       <div class="page-wrap">
 
-        <!-- =====================================================
-             DASHBOARD / MONITORING
-        ===================================================== -->
         <div v-if="activeMenu === 'dashboard'" class="anim-in">
 
-          <!-- HOLIDAY BANNER -->
           <div v-if="isTodayHoliday" class="greeting-bar gb-holiday">
             <span class="gb-ico">🏖️</span>
             <div>
@@ -417,51 +410,52 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- STAT CARDS -->
           <div class="stat-grid">
             <div class="stat-card sc-blue">
-              <div class="sc-icon-wrap sc-iw-blue"><svg width="20" height="20" fill="none" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="9" cy="7" r="4" stroke="currentColor" stroke-width="1.8"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
+              <div class="sc-icon-wrap"><svg fill="none" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="9" cy="7" r="4" stroke="currentColor" stroke-width="1.8"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
               <div class="sc-body"><span class="sc-label">Total Intern</span><span class="sc-num">{{ summary.total_interns }}</span></div>
             </div>
             <div class="stat-card sc-green">
-              <div class="sc-icon-wrap sc-iw-green"><svg width="20" height="20" fill="none" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+              <div class="sc-icon-wrap"><svg fill="none" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
               <div class="sc-body"><span class="sc-label">Hadir Hari Ini</span><span class="sc-num">{{ summary.present_today }}</span></div>
             </div>
             <div class="stat-card sc-amber">
-              <div class="sc-icon-wrap sc-iw-amber"><svg width="20" height="20" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.8"/><path d="M12 6v6l4 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
+              <div class="sc-icon-wrap"><svg fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.8"/><path d="M12 6v6l4 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
               <div class="sc-body"><span class="sc-label">Terlambat</span><span class="sc-num">{{ summary.late_today }}</span></div>
             </div>
             <div class="stat-card sc-purple">
-              <div class="sc-icon-wrap sc-iw-purple"><svg width="20" height="20" fill="none" viewBox="0 0 24 24"><path d="M9 12h6m-3-3v6m9-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
+              <div class="sc-icon-wrap"><svg fill="none" viewBox="0 0 24 24"><path d="M9 12h6m-3-3v6m9-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
               <div class="sc-body"><span class="sc-label">Izin</span><span class="sc-num">{{ summary.permit_today }}</span></div>
+            </div>
+            <div class="stat-card sc-red">
+              <div class="sc-icon-wrap"><svg fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.8"/><path d="M15 9l-6 6M9 9l6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
+              <div class="sc-body"><span class="sc-label">Tidak Hadir</span><span class="sc-num">{{ summary.absent_today }}</span></div>
             </div>
           </div>
 
-          <!-- CHARTS + REALTIME ROW -->
           <div class="dash-grid-2">
 
-            <!-- DONUT CHART -->
-            <div class="card chart-card">
-              <div class="card-top"><span class="card-label">DISTRIBUSI KEHADIRAN HARI INI</span></div>
-              <div class="donut-wrap">
-                <svg viewBox="0 0 120 120" class="donut-svg">
+            <div class="card chart-card full-screen-chart">
+              <div class="card-top"><span class="card-label">DISTRIBUSI KEHADIRAN HARI INI (VIEW FULL)</span></div>
+              <div class="donut-wrap jumbo-donut">
+                
+                <svg viewBox="0 0 300 300" class="donut-svg">
                   <path v-for="(seg,i) in donutSegments" :key="i" :d="seg.path" :fill="seg.color" />
-                  <text x="60" y="55" text-anchor="middle" class="donut-center-num">{{ summary.present_today }}</text>
-                  <text x="60" y="70" text-anchor="middle" class="donut-center-lbl">Hadir</text>
+                  <text x="150" y="145" text-anchor="middle" class="donut-center-num jumbo-text">{{ summary.present_today }}</text>
+                  <text x="150" y="180" text-anchor="middle" class="donut-center-lbl jumbo-label">Hadir</text>
                 </svg>
-                <div class="donut-legend">
-                  <div v-for="seg in donutSegments" :key="seg.label" class="dl-item">
+                
+                <div class="donut-legend jumbo-legend">
+                  <div v-for="seg in donutSegments" :key="seg.label" class="dl-item jumbo-dl-item">
                     <span class="dl-dot" :style="`background:${seg.color}`"></span>
                     <span class="dl-label">{{ seg.label }}</span>
                     <span class="dl-val">{{ seg.value }} <small>({{ seg.pctLabel }}%)</small></span>
                   </div>
-                  <!-- Show all categories even if 0 -->
                   <div v-if="!donutSegments.length" class="dl-empty">Belum ada data hari ini</div>
                 </div>
               </div>
             </div>
 
-            <!-- WEEKLY BAR CHART -->
             <div class="card chart-card">
               <div class="card-top"><span class="card-label">KEHADIRAN 7 HARI TERAKHIR</span></div>
               <div class="bar-chart-wrap">
@@ -478,13 +472,11 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- REALTIME TABLE -->
           <div class="card">
             <div class="card-top">
               <span class="card-label">REAL-TIME TRACKING</span>
               <div class="live-badge"><span class="live-dot"></span>LIVE</div>
             </div>
-            <!-- Search realtime -->
             <div class="filter-bar" style="margin-bottom:14px">
               <div class="search-wrap">
                 <svg class="search-ico" fill="none" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="1.8"/><path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
@@ -512,9 +504,6 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- =====================================================
-             HISTORY INTERN
-        ===================================================== -->
         <div v-if="activeMenu === 'history-intern'" class="anim-in">
           <div class="card">
             <div class="card-top">
@@ -522,7 +511,6 @@ onUnmounted(() => {
               <span class="result-count">{{ historyTotal }} data</span>
             </div>
 
-            <!-- FILTER BAR -->
             <div class="filter-bar">
               <div class="search-wrap">
                 <svg class="search-ico" fill="none" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="1.8"/><path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
@@ -574,7 +562,6 @@ onUnmounted(() => {
               </table>
             </div>
 
-            <!-- PAGINATION -->
             <div class="pagination" v-if="historyPages > 1">
               <button class="pg-btn" :disabled="historyPage===1" @click="historyPage=1">«</button>
               <button class="pg-btn" :disabled="historyPage===1" @click="historyPage--">‹</button>
@@ -589,9 +576,6 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- =====================================================
-             MANAGE INTERN / HR
-        ===================================================== -->
         <div v-if="activeMenu === 'manage-intern' || activeMenu === 'manage-hr'" class="anim-in">
           <div class="card">
             <div class="card-top">
@@ -628,11 +612,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- =====================================================
-             SETTINGS
-        ===================================================== -->
         <div v-if="activeMenu === 'settings'" class="anim-in">
-          <!-- JAM KERJA -->
           <div class="card" style="margin-bottom:18px">
             <div class="card-top">
               <span class="card-label">ATURAN JAM KERJA</span>
@@ -657,7 +637,6 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- KALENDER -->
           <div class="card">
             <div class="card-top">
               <span class="card-label">KALENDER HARI AKTIF</span>
@@ -695,12 +674,8 @@ onUnmounted(() => {
           </div>
         </div>
 
-      </div><!-- /page-wrap -->
-    </main>
+      </div></main>
 
-    <!-- =====================================================
-         MODAL: LOGBOOK DETAIL
-    ===================================================== -->
     <transition name="modal-pop">
       <div v-if="showLogbookModal" class="modal-bg">
         <div class="modal-box">
@@ -720,9 +695,6 @@ onUnmounted(() => {
       </div>
     </transition>
 
-    <!-- =====================================================
-         MODAL: FORM USER
-    ===================================================== -->
     <transition name="modal-pop">
       <div v-if="showModal" class="modal-bg">
         <div class="modal-box">
@@ -746,9 +718,6 @@ onUnmounted(() => {
       </div>
     </transition>
 
-    <!-- =====================================================
-         MODAL: EDIT ATTENDANCE
-    ===================================================== -->
     <transition name="modal-pop">
       <div v-if="showEditAttendanceModal" class="modal-bg">
         <div class="modal-box">
@@ -856,7 +825,7 @@ button, input, textarea, select { font-family: 'Inter', 'Helvetica Neue', Arial,
 ============================================================ */
 .main-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
 .topbar { display: flex; align-items: center; gap: 12px; padding: 0 22px; height: 58px; background: #ffffff; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
-.hamburger { display: none;; align-items: center; justify-content: center; width: 36px; height: 36px; border: none; background: #f0f4f9; border-radius: 8px; color: #64748b; cursor: pointer; flex-shrink: 0; transition: background .15s; }
+.hamburger { display: none; align-items: center; justify-content: center; width: 36px; height: 36px; border: none; background: #f0f4f9; border-radius: 8px; color: #64748b; cursor: pointer; flex-shrink: 0; transition: background .15s; }
 .hamburger:hover { background: #e2e8f0; }
 .topbar-center { flex: 1; padding-left: 4px; }
 .tb-page { font-size: .95rem; font-weight: 700; color: #111827; }
@@ -884,28 +853,81 @@ button, input, textarea, select { font-family: 'Inter', 'Helvetica Neue', Arial,
 .gb-sub { font-size: .8rem; color: #64748b; margin-top: 3px; }
 
 /* ============================================================
-   STAT CARDS
+   STAT CARDS (DIPERBESAR & LEBIH LEGA)
 ============================================================ */
-.stat-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 18px; }
-@media (max-width: 1200px) { .stat-grid { grid-template-columns: repeat(3, 1fr); } }
-@media (max-width: 768px)  { .stat-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 480px)  { .stat-grid { grid-template-columns: 1fr 1fr; } }
+.stat-grid { 
+  display: grid; 
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
+  gap: 20px; 
+  margin-bottom: 25px; 
+}
 
-.stat-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 18px; display: flex; align-items: center; gap: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
-.sc-icon-wrap { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.stat-card { 
+  background: #fff; 
+  border: 1px solid #e2e8f0; 
+  border-radius: 16px; 
+  padding: 24px 20px; 
+  display: flex; 
+  align-items: center; 
+  gap: 18px; 
+  box-shadow: 0 4px 6px rgba(0,0,0,.03), 0 1px 3px rgba(0,0,0,.05); 
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 10px 15px -3px rgba(0,0,0,.05), 0 4px 6px -2px rgba(0,0,0,.03);
+}
+
+.sc-icon-wrap { 
+  width: 54px; 
+  height: 54px; 
+  border-radius: 14px; 
+  display: flex; 
+  align-items: center; 
+  justify-content: center; 
+  flex-shrink: 0; 
+}
+
+.sc-icon-wrap svg {
+  width: 28px; 
+  height: 28px;
+}
+
 .sc-iw-blue   { background: #e8f1fb; color: #00529C; }
 .sc-iw-green  { background: #d1fae5; color: #059669; }
 .sc-iw-amber  { background: #fef3c7; color: #d97706; }
 .sc-iw-purple { background: #ede9fe; color: #7c3aed; }
 .sc-iw-red    { background: #fee2e2; color: #dc2626; }
-.sc-body { display: flex; flex-direction: column; min-width: 0; }
-.sc-label { font-size: .7rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
-.sc-num   { font-size: 1.7rem; font-weight: 800; color: #111827; line-height: 1.1; }
-.sc-blue  { border-bottom: 3px solid #00529C; }
-.sc-green { border-bottom: 3px solid #10b981; }
-.sc-amber { border-bottom: 3px solid #f59e0b; }
-.sc-purple{ border-bottom: 3px solid #7c3aed; }
-.sc-red   { border-bottom: 3px solid #ef4444; }
+
+.sc-body { 
+  display: flex; 
+  flex-direction: column; 
+  min-width: 0; 
+}
+
+.sc-label { 
+  font-size: .8rem; 
+  font-weight: 700; 
+  color: #64748b; 
+  text-transform: uppercase; 
+  letter-spacing: .05em; 
+  white-space: nowrap; 
+  margin-bottom: 4px; 
+}
+
+.sc-num { 
+  font-size: 2.2rem; 
+  font-weight: 900; 
+  color: #111827; 
+  line-height: 1; 
+}
+
+.sc-blue  { border-bottom: 4px solid #00529C; }
+.sc-green { border-bottom: 4px solid #10b981; }
+.sc-amber { border-bottom: 4px solid #f59e0b; }
+.sc-purple{ border-bottom: 4px solid #7c3aed; }
+.sc-red   { border-bottom: 4px solid #ef4444; }
 
 /* ============================================================
    CHART GRID
@@ -914,23 +936,100 @@ button, input, textarea, select { font-family: 'Inter', 'Helvetica Neue', Arial,
 @media (max-width: 900px) { .dash-grid-2 { grid-template-columns: 1fr; } }
 
 .chart-card { padding: 20px; }
-.donut-wrap { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
-.donut-svg { width: 120px; height: 120px; flex-shrink: 0; }
-.donut-center-num { font-size: 16px; font-weight: 800; fill: #111827; }
-.donut-center-lbl { font-size: 8px; fill: #64748b; }
-.donut-legend { flex: 1; min-width: 120px; }
-.dl-item { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.dl-dot  { width: 9px; height: 9px; border-radius: 3px; flex-shrink: 0; }
-.dl-label { font-size: .78rem; color: #64748b; flex: 1; }
-.dl-val  { font-size: .82rem; font-weight: 700; color: #111827; white-space: nowrap; }
-.dl-val small { font-weight: 400; color: #9ca3af; font-size: .7rem; }
-.dl-empty { font-size: .78rem; color: #9ca3af; font-style: italic; }
-
 .bar-chart-wrap { width: 100%; overflow-x: auto; }
 .bar-svg { width: 100%; min-width: 200px; height: 140px; }
 .bar-val-txt { font-size: 7px; fill: #64748b; font-weight: 700; }
 .bar-day-txt { font-size: 7px; fill: #9ca3af; }
 .bar-empty-txt { font-size: 10px; fill: #9ca3af; font-style: italic; }
+
+/* ============================================================
+   JUMBO DONUT CHART (BIKIN PENUH LAYAR)
+============================================================ */
+@media (min-width: 901px) {
+  .dash-grid-2 {
+    grid-template-columns: 1fr; /* Jadi satu kolom jumbo */
+  }
+}
+
+.full-screen-chart {
+  padding: 40px; 
+  min-height: 80dvh; 
+  display: flex;
+  flex-direction: column;
+}
+
+.jumbo-donut {
+  flex: 1; 
+  display: flex;
+  flex-direction: column; 
+  align-items: center;
+  justify-content: center;
+  gap: 40px; 
+}
+
+@media (min-width: 768px) {
+  .jumbo-donut {
+    flex-direction: row; 
+    gap: 60px;
+  }
+}
+
+.jumbo-donut .donut-svg {
+  width: 100%; 
+  max-width: 500px; 
+  height: auto;
+}
+
+.jumbo-text {
+  font-size: 48px; 
+  font-weight: 900;
+}
+
+.jumbo-label {
+  font-size: 18px; 
+  font-weight: 700;
+}
+
+.jumbo-legend {
+  width: 100%;
+  max-width: 350px; 
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.jumbo-dl-item {
+  padding: 15px;
+  background: #f8fafc;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  display: flex; 
+  align-items: center; 
+  gap: 8px;
+}
+
+.jumbo-dl-item .dl-label {
+  font-size: 1rem; 
+  font-weight: 700;
+  color: #64748b; 
+  flex: 1;
+}
+
+.jumbo-dl-item .dl-val {
+  font-size: 1.1rem; 
+  font-weight: 800;
+  color: #111827; 
+  white-space: nowrap;
+}
+.jumbo-dl-item .dl-val small { font-weight: 400; color: #9ca3af; font-size: .8rem; }
+
+.jumbo-dl-item .dl-dot {
+  width: 15px; 
+  height: 15px;
+  border-radius: 3px; 
+  flex-shrink: 0;
+}
+.dl-empty { font-size: .78rem; color: #9ca3af; font-style: italic; }
 
 /* ============================================================
    LIVE BADGE
