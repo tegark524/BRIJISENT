@@ -50,6 +50,71 @@ const modelsLoaded = ref(false)
 const isLoadingModels = ref(false)
 
 // ==========================================
+// SERVER TIME — anti-manipulasi client
+// ==========================================
+// Menyimpan selisih (ms) antara jam server dan jam browser.
+// Dihitung sekali saat fetchTodayData, lalu diterapkan ke currentTime
+// setiap detik via serverNow computed → semua pengecekan jam pakai ini.
+const serverTimeOffset = ref(0)
+
+// Waktu "sekarang" yang sudah dikoreksi dengan offset server
+const serverNow = computed(() => new Date(currentTime.value.getTime() + serverTimeOffset.value))
+
+// Menit total dalam hari menurut server time (0–1439)
+const serverMinutes = computed(() => serverNow.value.getHours() * 60 + serverNow.value.getMinutes())
+
+// Hari kerja: Senin(1) – Jumat(5)
+const isHariKerja = computed(() => {
+  const d = serverNow.value.getDay()
+  return d >= 1 && d <= 5
+})
+
+// ==========================================
+// KONSTANTA BATAS JAM KERJA (dalam menit)
+// ==========================================
+const JAM_BUKA      = 6 * 60 + 30   // 06:30 — absensi mulai dibuka
+const JAM_TUTUP_IN  = 17 * 60        // 17:00 — batas terakhir absen masuk
+const JAM_TUTUP_OUT = 18 * 60        // 18:00 — batas terakhir absen pulang
+
+// ==========================================
+// COMPUTED: STATUS HARI & VALIDASI JAM
+// ==========================================
+
+// Hari aktif = hari kerja (Senin–Jumat) + bukan libur nasional dari server
+const isHariAktif = computed(() => {
+  if (!isHariKerja.value) return false
+  if (currentHoliday.value) return false
+  return true
+})
+
+// Tombol absen masuk boleh klik:
+//   hari aktif + jam 06:30–17:00 + status belum absen
+const jamMasukValid = computed(() => {
+  if (!isHariAktif.value) return false
+  return serverMinutes.value >= JAM_BUKA && serverMinutes.value < JAM_TUTUP_IN
+})
+
+// Tombol absen pulang boleh klik:
+//   hari aktif + sudah clock_in + jam 06:30–18:00
+const jamKeluarValid = computed(() => {
+  if (!isHariAktif.value) return false
+  if (!todayAttendance.value?.clock_in) return false
+  return serverMinutes.value >= JAM_BUKA && serverMinutes.value < JAM_TUTUP_OUT
+})
+
+// Banner kunci jam — hanya muncul di hari aktif (weekend/libur sudah ada greetingMsg)
+const lockMessage = computed(() => {
+  if (!isHariAktif.value) return null
+  if (serverMinutes.value < JAM_BUKA)
+    return { type: 'early', icon: '🕐', title: 'Belum Waktunya', text: 'Absensi baru dibuka mulai pukul 06.30 WIB' }
+  if (serverMinutes.value >= JAM_TUTUP_OUT)
+    return { type: 'closed', icon: '🔒', title: 'Absensi Ditutup', text: 'Waktu absensi telah berakhir (setelah 18.00 WIB)' }
+  if (serverMinutes.value >= JAM_TUTUP_IN && !todayAttendance.value?.clock_in)
+    return { type: 'late', icon: '⏰', title: 'Terlambat', text: 'Absen masuk ditutup sejak 17.00 WIB. Hubungi HR jika ada keperluan.' }
+  return null
+})
+
+// ==========================================
 // HELPER: VALIDASI FACE DESCRIPTOR
 // ==========================================
 const hasFaceDescriptor = (userData) => {
@@ -115,6 +180,7 @@ const captureFrame = (videoRef) => {
   if (!videoRef.value || videoRef.value.videoWidth === 0) return null
   const c = document.createElement('canvas')
   c.width = videoRef.value.videoWidth; c.height = videoRef.value.videoHeight
+  // Capture frame ASLI (tidak di-mirror) agar face-api.js tetap akurat
   c.getContext('2d').drawImage(videoRef.value, 0, 0)
   return c
 }
@@ -182,6 +248,14 @@ const initKamera = async () => {
 }
 
 const bukaKamera = async (jenis) => {
+  // Guard: blokir hard di layer JS, bukan hanya disable tombol
+  if (jenis === 'masuk' && !jamMasukValid.value) {
+    const msg = lockMessage.value?.text || 'Di luar jam absensi.'
+    return Swal.fire({ icon: 'warning', title: 'Tidak Dapat Absen Masuk', text: msg, confirmButtonColor: '#00529C' })
+  }
+  if (jenis === 'keluar' && !jamKeluarValid.value) {
+    return Swal.fire({ icon: 'warning', title: 'Tidak Dapat Absen Pulang', text: 'Di luar jam absensi atau belum absen masuk.', confirmButtonColor: '#00529C' })
+  }
   jenisAbsen.value = jenis; showCameraModal.value = true
   await nextTick(); await initKamera()
 }
@@ -248,7 +322,19 @@ const toggleStatus = async () => {
 const fetchTodayData = async () => {
   if (!user.value?.id) return
   try {
+    // Catat waktu sebelum & sesudah request untuk estimasi RTT
+    const clientBefore = Date.now()
     const r = await axios.get(`/attendances/today/${user.value.id}`)
+    const clientAfter = Date.now()
+
+    // Hitung offset server vs client dari field server_time di response
+    // Backend WAJIB mengembalikan: { server_time: "2025-02-25T10:29:58+07:00", ... }
+    if (r.data.server_time) {
+      const serverTs = new Date(r.data.server_time).getTime()
+      const clientMid = Math.round((clientBefore + clientAfter) / 2)
+      serverTimeOffset.value = serverTs - clientMid
+    }
+
     todayAttendance.value = r.data.attendance || null
     logbookText.value = r.data.attendance?.logbook || ''
     isWeekend.value = r.data.is_weekend
@@ -278,7 +364,8 @@ const statusCfg = computed(() => {
 
 const greetingMsg = computed(() => {
   if (currentHoliday.value) return { title: 'Hari Libur 🎉', sub: `Selamat berlibur — ${currentHoliday.value.description}`, type: 'holiday' }
-  if (isWeekend.value && !todayAttendance.value) return { title: 'Selamat Weekend! 🏖️', sub: 'Istirahat yang cukup, sampai Senin!', type: 'holiday' }
+  // isWeekend dari server (bukan dari client), jadi aman
+  if (isWeekend.value) return { title: 'Selamat Weekend! 🏖️', sub: 'Istirahat yang cukup, sampai Senin!', type: 'holiday' }
   if (todayAttendance.value?.status === 'permit') {
     const alasan = todayAttendance.value.permit_reason || todayAttendance.value.logbook || 'Keperluan tertentu'
     return { title: 'Anda Sedang Izin 📋', sub: `Alasan: "${alasan}". Semoga lancar!`, type: 'izin' }
@@ -287,8 +374,9 @@ const greetingMsg = computed(() => {
   return null
 })
 
-const canClockIn = computed(() => attendanceStatus.value === 'BELUM ABSEN')
-const canClockOut = computed(() => attendanceStatus.value === 'DI KANTOR')
+// Tombol aktif HANYA jika status sesuai + jam valid + hari aktif
+const canClockIn  = computed(() => attendanceStatus.value === 'BELUM ABSEN' && jamMasukValid.value)
+const canClockOut = computed(() => attendanceStatus.value === 'DI KANTOR'   && jamKeluarValid.value)
 
 // ==========================================
 // LOGBOOK & HISTORY
@@ -382,13 +470,10 @@ onUnmounted(() => {
 
     <!-- ===== SIDEBAR ===== -->
     <aside class="sidebar" :class="{ 'sidebar-visible': isSidebarOpen }">
-      <!-- Brand -->
       <div class="sb-brand">
         <img src="/LOGO.png" alt="BRI" class="sb-logo" onerror="this.style.display='none'" />
         <span class="sb-title">BRI<span class="sb-orange">JISENT</span></span>
       </div>
-
-      <!-- User -->
       <div class="sb-user">
         <div class="sb-avatar">{{ user.name ? user.name.charAt(0).toUpperCase() : 'U' }}</div>
         <div class="sb-userinfo">
@@ -396,8 +481,6 @@ onUnmounted(() => {
           <span class="sb-name">{{ user.name || 'Intern' }}</span>
         </div>
       </div>
-
-      <!-- Nav -->
       <nav class="sb-nav">
         <button class="nav-btn" :class="{ 'nav-btn-active': activeMenu === 'beranda' }" @click="switchMenu('beranda')">
           <svg class="nav-ico" fill="none" viewBox="0 0 24 24"><path d="M3 12L12 3l9 9M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -412,8 +495,6 @@ onUnmounted(() => {
           Riwayat Logbook
         </button>
       </nav>
-
-      <!-- Logout -->
       <div class="sb-foot">
         <button @click="authStore.logout()" class="btn-logout">
           <svg width="15" height="15" fill="none" viewBox="0 0 24 24"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-6 0v-1m0-8V7a3 3 0 016 0v1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -425,14 +506,14 @@ onUnmounted(() => {
     <!-- ===== MAIN ===== -->
     <main class="main-area">
 
-      <!-- TOPBAR -->
+      <!-- TOPBAR: tampilkan serverNow bukan currentTime agar user lihat jam server -->
       <header class="topbar">
         <button class="hamburger" @click="toggleSidebar">
           <svg width="20" height="20" fill="none" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         </button>
         <div class="topbar-right">
-          <span class="tb-date">{{ currentTime.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) }}</span>
-          <span class="tb-time">{{ currentTime.toLocaleTimeString('id-ID') }} <em>WIB</em></span>
+          <span class="tb-date">{{ serverNow.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) }}</span>
+          <span class="tb-time">{{ serverNow.toLocaleTimeString('id-ID') }} <em>WIB</em></span>
         </div>
       </header>
 
@@ -454,18 +535,17 @@ onUnmounted(() => {
           <!-- DASHBOARD 2-COL GRID -->
           <div class="dash-grid">
 
-            <!-- PANEL KEHADIRAN -->
+            <!-- ===== PANEL KEHADIRAN ===== -->
             <div class="card">
               <div class="card-top">
                 <span class="card-label">STATUS KEHADIRAN</span>
-                <!-- Status Chip -->
                 <div class="status-chip" :style="`color:${statusCfg.color};background:${statusCfg.bg};border:1.5px solid ${statusCfg.border}`">
                   <span class="sdot" :style="`background:${statusCfg.dot}`"></span>
                   {{ statusCfg.label }}
                 </div>
               </div>
 
-              <!-- Timeline jam -->
+              <!-- Timeline jam masuk/pulang -->
               <div class="timeline" v-if="todayAttendance && todayAttendance.status !== 'permit'">
                 <div class="tl-block">
                   <div class="tl-dot" :class="{ 'tl-dot-on': todayAttendance?.clock_in }"></div>
@@ -484,35 +564,86 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <!-- ACTION BUTTONS -->
-              <div class="action-col">
+              <!-- BANNER: Weekend / Libur Nasional → tidak ada tombol sama sekali -->
+              <div v-if="!isHariAktif && !todayAttendance?.clock_in" class="lock-bar lb-holiday">
+                <span class="lb-ico">{{ currentHoliday ? '🎉' : '🏖️' }}</span>
+                <div>
+                  <p class="lb-title">{{ currentHoliday ? 'Hari Libur Nasional' : 'Akhir Pekan' }}</p>
+                  <p class="lb-text">{{ currentHoliday ? currentHoliday.description : 'Tidak ada aktivitas absensi pada hari Sabtu & Minggu.' }}</p>
+                </div>
+              </div>
+
+              <!-- BANNER: Jam terkunci (hanya di hari aktif) -->
+              <div v-if="lockMessage && isHariAktif && !todayAttendance?.clock_out && attendanceStatus !== 'IZIN TIDAK MASUK'" class="lock-bar" :class="`lb-${lockMessage.type}`">
+                <span class="lb-ico">{{ lockMessage.icon }}</span>
+                <div>
+                  <p class="lb-title">{{ lockMessage.title }}</p>
+                  <p class="lb-text">{{ lockMessage.text }}</p>
+                </div>
+              </div>
+
+              <!-- ACTION BUTTONS: hanya tampil jika hari aktif atau sudah punya record hari ini -->
+              <div class="action-col" v-if="isHariAktif || todayAttendance">
+
                 <!-- Absen Masuk -->
-                <button v-if="canClockIn" @click="bukaKamera('masuk')" class="abtn abtn-blue">
+                <button
+                  v-if="attendanceStatus === 'BELUM ABSEN' && isHariAktif"
+                  @click="bukaKamera('masuk')"
+                  :disabled="!canClockIn"
+                  class="abtn"
+                  :class="canClockIn ? 'abtn-blue' : 'abtn-disabled'"
+                >
                   <svg width="17" height="17" fill="none" viewBox="0 0 24 24"><path d="M15 10l4.553-2.069A1 1 0 0121 8.87v6.26a1 1 0 01-1.447.9L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" stroke="currentColor" stroke-width="1.8"/></svg>
-                  Absen Masuk
+                  {{ canClockIn ? 'Absen Masuk' : serverMinutes < JAM_BUKA ? 'Absensi Belum Dibuka' : 'Waktu Absen Masuk Habis' }}
                 </button>
 
                 <!-- Absen Pulang -->
-                <button v-if="!canClockIn && attendanceStatus !== 'IZIN TIDAK MASUK'" @click="bukaKamera('keluar')" :disabled="!canClockOut" class="abtn" :class="canClockOut ? 'abtn-orange' : 'abtn-disabled'">
+                <button
+                  v-if="todayAttendance?.clock_in && !todayAttendance?.clock_out && attendanceStatus !== 'IZIN TIDAK MASUK'"
+                  @click="bukaKamera('keluar')"
+                  :disabled="!canClockOut"
+                  class="abtn"
+                  :class="canClockOut ? 'abtn-orange' : 'abtn-disabled'"
+                >
                   <svg width="17" height="17" fill="none" viewBox="0 0 24 24"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-                  {{ attendanceStatus === 'SUDAH PULANG' ? 'Sudah Pulang' : 'Absen Pulang' }}
+                  {{ canClockOut ? 'Absen Pulang' : 'Waktu Absen Pulang Ditutup' }}
                 </button>
 
-                <!-- Toggle keluar/kembali -->
-                <button v-if="todayAttendance?.id && !todayAttendance.clock_out" @click="toggleStatus" class="abtn" :class="attendanceStatus === 'SEDANG KELUAR' ? 'abtn-green' : 'abtn-green'">
+                <!-- Sudah pulang: hanya tampilkan status, tidak ada aksi -->
+                <div v-if="attendanceStatus === 'SUDAH PULANG'" class="abtn abtn-done">
+                  <svg width="17" height="17" fill="none" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  Absensi Hari Ini Selesai
+                </div>
+
+                <!-- Izin keluar sebentar / kembali ke kantor -->
+                <button
+                  v-if="todayAttendance?.id && !todayAttendance.clock_out && attendanceStatus !== 'IZIN TIDAK MASUK'"
+                  @click="toggleStatus"
+                  class="abtn abtn-green"
+                >
                   <svg width="17" height="17" fill="none" viewBox="0 0 24 24"><path d="M8 9l4-4 4 4M16 15l-4 4-4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
                   {{ attendanceStatus === 'SEDANG KELUAR' ? 'Kembali ke Kantor' : 'Izin Keluar Sebentar' }}
                 </button>
 
-                <!-- Ajukan Izin -->
-                <button v-if="!todayAttendance?.id" @click="showIzinModal = true" class="abtn abtn-ghost">
+                <!-- Ajukan Izin: hanya jika belum ada record + hari aktif -->
+                <button
+                  v-if="!todayAttendance?.id && isHariAktif"
+                  @click="showIzinModal = true"
+                  class="abtn abtn-ghost"
+                >
                   <svg width="17" height="17" fill="none" viewBox="0 0 24 24"><path d="M9 12h6m-3-3v6m9-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
                   Ajukan Izin Tidak Masuk
                 </button>
+
               </div>
+
+              <!-- Info jam kerja aktif -->
+              <p v-if="isHariAktif" class="jam-info">
+                🕐 Jam absensi: <strong>06.30–17.00</strong> masuk &nbsp;·&nbsp; <strong>s/d 18.00</strong> pulang
+              </p>
             </div>
 
-            <!-- PANEL LOGBOOK -->
+            <!-- ===== PANEL LOGBOOK ===== -->
             <div class="card">
               <div class="card-top">
                 <span class="card-label">LOGBOOK HARIAN</span>
@@ -525,14 +656,15 @@ onUnmounted(() => {
                 v-model="logbookText"
                 class="lb-area"
                 rows="7"
-                :placeholder="todayAttendance?.status === 'permit' ? 'Sedang izin — tidak perlu mengisi logbook.' : 'Contoh: Meeting tim, debugging API, review kode...'"
+                :placeholder="!isHariAktif ? 'Hari libur — logbook tidak diperlukan.' : todayAttendance?.status === 'permit' ? 'Sedang izin — tidak perlu mengisi logbook.' : 'Contoh: Meeting tim, debugging API, review kode...'"
                 :disabled="!todayAttendance?.id || todayAttendance?.status === 'permit'"
               ></textarea>
               <button @click="simpanLogbook" class="btn-save-lb" :disabled="!todayAttendance?.id || !logbookText.trim() || todayAttendance?.status === 'permit'">
                 <svg width="15" height="15" fill="none" viewBox="0 0 24 24"><path d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
                 Simpan Laporan
               </button>
-              <p v-if="!todayAttendance?.id" class="hint-sm">Absen masuk terlebih dahulu untuk mengisi logbook.</p>
+              <p v-if="!todayAttendance?.id && isHariAktif" class="hint-sm">Absen masuk terlebih dahulu untuk mengisi logbook.</p>
+              <p v-else-if="!isHariAktif" class="hint-sm">Logbook hanya tersedia pada hari kerja.</p>
             </div>
 
           </div>
@@ -583,7 +715,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-      </div><!-- /page-wrap -->
+      </div>
     </main>
 
     <!-- ============================================================
@@ -592,25 +724,21 @@ onUnmounted(() => {
     <transition name="modal-pop">
       <div v-if="showRegistrationModal" class="modal-bg modal-bg-dark">
         <div class="modal-box">
-          <!-- Header -->
           <div class="reg-head">
             <div class="reg-badge-pill">BRIJISENT</div>
             <h2 class="reg-h">Registrasi Biometrik</h2>
             <p class="reg-sub">Daftarkan wajah Anda untuk mengaktifkan akses sistem kehadiran.</p>
           </div>
-          <!-- Kamera select -->
           <div class="modal-pad">
             <label class="flbl">Pilih Kamera</label>
             <select v-model="kameraTerpilih" @change="startStream(videoElementReg, kameraTerpilih)" class="fsel">
               <option v-for="(c,i) in listKamera" :key="c.deviceId" :value="c.deviceId">{{ c.label || `Kamera ${i+1}` }}</option>
             </select>
           </div>
-          <!-- Video -->
           <div class="cam-wrap">
             <video ref="videoElementReg" autoplay playsinline muted class="cam-vid"></video>
             <div class="cam-guide-ring"></div>
           </div>
-          <!-- CTA -->
           <div class="modal-pad" style="padding-bottom:20px">
             <button @click="prosesRegistrasiWajah" class="btn-capture" :disabled="isLoadingModels">
               <span v-if="isLoadingModels" class="mini-spin"></span>
@@ -695,198 +823,63 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* ============================================================
-   RESET & BASE
-============================================================ */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 button, input, textarea, select { font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif; }
 
-/* ============================================================
-   SHELL — main layout
-============================================================ */
-.shell {
-  display: flex;
-  height: 100dvh;
-  background: #f0f4f9;
-  font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
-  color: #111827;
-  overflow: hidden;
-}
+.shell { display: flex; height: 100dvh; background: #f0f4f9; font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif; color: #111827; overflow: hidden; }
 
-/* ============================================================
-   OVERLAY DIM (mobile sidebar backdrop)
-============================================================ */
-.overlay-dim {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  z-index: 199;
-  backdrop-filter: blur(3px);
-}
+/* OVERLAY */
+.overlay-dim { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 199; backdrop-filter: blur(3px); }
 .fade-overlay-enter-active, .fade-overlay-leave-active { transition: opacity .25s; }
 .fade-overlay-enter-from, .fade-overlay-leave-to { opacity: 0; }
 
-/* ============================================================
-   SIDEBAR
-============================================================ */
-.sidebar {
-  width: 250px;
-  min-width: 250px;
-  flex-shrink: 0;
-  background: #ffffff;
-  border-right: 1px solid #e2e8f0;
-  display: flex;
-  flex-direction: column;
-  z-index: 200;
-  transition: transform .28s cubic-bezier(.4,0,.2,1);
-}
-
-/* On ≤1024px: sidebar slides in from left */
-@media (max-width: 1024px) {
-  .sidebar {
-    position: fixed;
-    top: 0; left: 0; bottom: 0;
-    transform: translateX(-100%);
-    box-shadow: 4px 0 20px rgba(0,0,0,.12);
-  }
-  .sidebar-visible { transform: translateX(0) !important; }
-}
-
-/* On >1024px: sidebar always visible */
-@media (min-width: 1025px) {
-  .sidebar { transform: translateX(0) !important; }
-  .sidebar:not(.sidebar-visible) { transform: translateX(-100%); }
-  .sidebar-visible { transform: translateX(0); }
-}
-
-/* BRAND */
-.sb-brand {
-  display: flex; align-items: center; gap: 10px;
-  padding: 20px 18px 16px;
-  border-bottom: 1px solid #e2e8f0;
-}
+/* SIDEBAR */
+.sidebar { width: 250px; min-width: 250px; flex-shrink: 0; background: #ffffff; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; z-index: 200; transition: transform .28s cubic-bezier(.4,0,.2,1); }
+@media (max-width: 1024px) { .sidebar { position: fixed; top: 0; left: 0; bottom: 0; transform: translateX(-100%); box-shadow: 4px 0 20px rgba(0,0,0,.12); } .sidebar-visible { transform: translateX(0) !important; } }
+@media (min-width: 1025px) { .sidebar { transform: translateX(0) !important; } .sidebar:not(.sidebar-visible) { transform: translateX(-100%); } .sidebar-visible { transform: translateX(0); } }
+.sb-brand { display: flex; align-items: center; gap: 10px; padding: 20px 18px 16px; border-bottom: 1px solid #e2e8f0; }
 .sb-logo { width: 32px; height: 32px; object-fit: contain; }
 .sb-title { font-size: 1.1rem; font-weight: 800; color: #00529C; letter-spacing: .3px; }
 .sb-orange { color: #F37021; }
-
-/* USER */
-.sb-user {
-  display: flex; align-items: center; gap: 11px;
-  padding: 14px 18px;
-  border-bottom: 1px solid #e2e8f0;
-  background: #e8f1fb;
-}
-.sb-avatar {
-  width: 38px; height: 38px; border-radius: 50%;
-  background: #00529C; color: #fff;
-  display: flex; align-items: center; justify-content: center;
-  font-size: .95rem; font-weight: 800; flex-shrink: 0;
-}
+.sb-user { display: flex; align-items: center; gap: 11px; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; background: #e8f1fb; }
+.sb-avatar { width: 38px; height: 38px; border-radius: 50%; background: #00529C; color: #fff; display: flex; align-items: center; justify-content: center; font-size: .95rem; font-weight: 800; flex-shrink: 0; }
 .sb-userinfo { display: flex; flex-direction: column; min-width: 0; }
 .sb-hi { font-size: .68rem; color: #64748b; }
 .sb-name { font-size: .88rem; font-weight: 700; color: #003f8a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-/* NAV */
 .sb-nav { flex: 1; padding: 12px 10px; display: flex; flex-direction: column; gap: 3px; overflow-y: auto; }
-.nav-btn {
-  display: flex; align-items: center; gap: 10px;
-  padding: 11px 13px; width: 100%;
-  border: none; background: transparent; border-radius: 8px;
-  color: #64748b; font-size: .85rem; font-weight: 600;
-  cursor: pointer; text-align: left;
-  transition: background .15s, color .15s;
-}
+.nav-btn { display: flex; align-items: center; gap: 10px; padding: 11px 13px; width: 100%; border: none; background: transparent; border-radius: 8px; color: #64748b; font-size: .85rem; font-weight: 600; cursor: pointer; text-align: left; transition: background .15s, color .15s; }
 .nav-btn:hover { background: #f0f4f9; color: #00529C; }
 .nav-btn-active { background: #e8f1fb !important; color: #00529C !important; }
 .nav-ico { width: 17px; height: 17px; flex-shrink: 0; }
-
-/* LOGOUT */
 .sb-foot { padding: 14px; border-top: 1px solid #e2e8f0; }
-.btn-logout {
-  width: 100%; padding: 10px 14px;
-  display: flex; align-items: center; justify-content: center; gap: 7px;
-  background: #fff5f5; color: #dc2626;
-  border: 1px solid #fecaca; border-radius: 8px;
-  font-size: .83rem; font-weight: 600; cursor: pointer;
-  transition: background .15s;
-}
+.btn-logout { width: 100%; padding: 10px 14px; display: flex; align-items: center; justify-content: center; gap: 7px; background: #fff5f5; color: #dc2626; border: 1px solid #fecaca; border-radius: 8px; font-size: .83rem; font-weight: 600; cursor: pointer; transition: background .15s; }
 .btn-logout:hover { background: #fee2e2; }
 
-/* ============================================================
-   MAIN AREA
-============================================================ */
-.main-area {
-  flex: 1;
-  display: flex; flex-direction: column;
-  overflow: hidden; min-width: 0;
-}
-
-/* TOPBAR */
-.topbar {
-  display: flex; align-items: center; gap: 14px;
-  padding: 0 22px; height: 58px;
-  background: #ffffff;
-  border-bottom: 1px solid #e2e8f0;
-  flex-shrink: 0;
-}
-.hamburger {
-  display: flex; align-items: center; justify-content: center;
-  width: 36px; height: 36px;
-  border: none; background: #f0f4f9; border-radius: 8px;
-  color: #64748b; cursor: pointer; flex-shrink: 0;
-  transition: background .15s;
-}
+/* MAIN */
+.main-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+.topbar { display: flex; align-items: center; gap: 14px; padding: 0 22px; height: 58px; background: #ffffff; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
+.hamburger { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: none; background: #f0f4f9; border-radius: 8px; color: #64748b; cursor: pointer; flex-shrink: 0; transition: background .15s; }
 .hamburger:hover { background: #e2e8f0; }
 .topbar-right { margin-left: auto; text-align: right; }
 .tb-date { display: block; font-size: .72rem; color: #94a3b8; }
 .tb-time { font-size: 1rem; font-weight: 800; color: #00529C; }
 .tb-time em { font-style: normal; font-size: .7rem; font-weight: 500; color: #94a3b8; margin-left: 2px; }
-
-/* PAGE WRAP */
 .page-wrap { flex: 1; overflow-y: auto; padding: 22px; }
-
 .anim-in { animation: animIn .3s ease both; }
 @keyframes animIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
-/* ============================================================
-   CARDS / PANELS
-============================================================ */
-.card {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 14px;
-  padding: 22px;
-  box-shadow: 0 1px 3px rgba(0,0,0,.05), 0 4px 16px rgba(0,0,0,.04);
-}
-
-.card-top {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 10px; margin-bottom: 18px; flex-wrap: wrap;
-}
-.card-label {
-  font-size: .67rem; font-weight: 700;
-  text-transform: uppercase; letter-spacing: .09em;
-  color: #9ca3af;
-}
+/* CARDS */
+.card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 22px; box-shadow: 0 1px 3px rgba(0,0,0,.05), 0 4px 16px rgba(0,0,0,.04); }
+.card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+.card-label { font-size: .67rem; font-weight: 700; text-transform: uppercase; letter-spacing: .09em; color: #9ca3af; }
 
 /* STATUS CHIP */
-.status-chip {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 5px 12px; border-radius: 20px;
-  font-size: .76rem; font-weight: 700;
-}
-.sdot {
-  width: 7px; height: 7px; border-radius: 50%;
-  animation: sdot-pulse 2s ease infinite;
-}
+.status-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 20px; font-size: .76rem; font-weight: 700; }
+.sdot { width: 7px; height: 7px; border-radius: 50%; animation: sdot-pulse 2s ease infinite; }
 @keyframes sdot-pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
 /* GREETING BANNER */
-.greeting-bar {
-  display: flex; align-items: flex-start; gap: 14px;
-  padding: 15px 18px; border-radius: 12px; border-left: 4px solid;
-  margin-bottom: 18px; animation: animIn .3s ease;
-}
+.greeting-bar { display: flex; align-items: flex-start; gap: 14px; padding: 15px 18px; border-radius: 12px; border-left: 4px solid; margin-bottom: 18px; animation: animIn .3s ease; }
 .gb-holiday { background: #f0fdf4; border-color: #22c55e; }
 .gb-izin    { background: #fffbeb; border-color: #f59e0b; }
 .gb-pulang  { background: #e8f1fb; border-color: #00529C; }
@@ -894,49 +887,35 @@ button, input, textarea, select { font-family: 'Inter', 'Helvetica Neue', Arial,
 .gb-title { font-size: .9rem; font-weight: 700; color: #111827; }
 .gb-sub   { font-size: .8rem; color: #64748b; margin-top: 3px; line-height: 1.5; }
 
-/* DASHBOARD 2-COL GRID */
-.dash-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 18px;
-}
-/* iPad & below: stack columns */
-@media (max-width: 1024px) {
-  .dash-grid { grid-template-columns: 1fr; }
-}
+/* LOCK BANNER */
+.lock-bar { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border-radius: 10px; border-left: 3px solid; margin-bottom: 14px; }
+.lb-early   { background: #fffbeb; border-color: #f59e0b; }
+.lb-closed  { background: #f1f5f9; border-color: #94a3b8; }
+.lb-late    { background: #fff5f5; border-color: #f87171; }
+.lb-holiday { background: #f0fdf4; border-color: #22c55e; }
+.lb-ico   { font-size: 1.05rem; flex-shrink: 0; margin-top: 1px; }
+.lb-title { font-size: .8rem; font-weight: 700; color: #111827; }
+.lb-text  { font-size: .74rem; color: #64748b; margin-top: 2px; line-height: 1.5; }
+
+/* DASHBOARD GRID */
+.dash-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 1024px) { .dash-grid { grid-template-columns: 1fr; } }
 
 /* TIMELINE */
-.timeline {
-  display: flex; align-items: center;
-  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;
-  padding: 12px 16px; margin-bottom: 18px; gap: 0;
-}
+.timeline { display: flex; align-items: center; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 16px; margin-bottom: 18px; }
 .tl-block { display: flex; align-items: center; gap: 9px; flex: 1; }
 .tl-line  { width: 28px; height: 1px; background: #e2e8f0; flex-shrink: 0; }
-.tl-dot {
-  width: 11px; height: 11px; border-radius: 50%;
-  border: 2px solid #e2e8f0; background: #fff;
-  flex-shrink: 0; transition: all .25s;
-}
+.tl-dot { width: 11px; height: 11px; border-radius: 50%; border: 2px solid #e2e8f0; background: #fff; flex-shrink: 0; transition: all .25s; }
 .tl-dot-on { border-color: #00529C; background: #00529C; }
 .tl-info { display: flex; flex-direction: column; }
 .tl-lbl { font-size: .66rem; color: #9ca3af; font-weight: 600; }
 .tl-val { font-size: .9rem; font-weight: 800; color: #111827; font-variant-numeric: tabular-nums; }
 
-/* ============================================================
-   ACTION BUTTONS
-============================================================ */
+/* ACTION BUTTONS */
 .action-col { display: flex; flex-direction: column; gap: 10px; }
-.abtn {
-  display: flex; align-items: center; gap: 10px;
-  width: 100%; padding: 13px 16px;
-  border: none; border-radius: 9px;
-  font-size: .875rem; font-weight: 700; cursor: pointer;
-  transition: filter .15s, transform .1s;
-}
+.abtn { display: flex; align-items: center; gap: 10px; width: 100%; padding: 13px 16px; border: none; border-radius: 9px; font-size: .875rem; font-weight: 700; cursor: pointer; transition: filter .15s, transform .1s; }
 .abtn:active:not(:disabled) { transform: scale(.98); }
-.abtn:disabled, .abtn-disabled { background: #f1f5f9 !important; color: #9ca3af !important; cursor: not-allowed !important; }
-
+.abtn:disabled, .abtn-disabled { background: #f1f5f9 !important; color: #9ca3af !important; cursor: not-allowed !important; border: none !important; }
 .abtn-blue   { background: #00529C; color: #ffffff; }
 .abtn-blue:hover   { filter: brightness(1.1); }
 .abtn-orange { background: #F37021; color: #ffffff; }
@@ -945,45 +924,28 @@ button, input, textarea, select { font-family: 'Inter', 'Helvetica Neue', Arial,
 .abtn-green:hover  { background: #fef3c7; }
 .abtn-ghost  { background: #f0f4f9; color: #00529C; border: 1.5px solid #00529C; }
 .abtn-ghost:hover  { background: #e8f1fb; }
+.abtn-done   { background: #f0fdf4; color: #166534; border: 1.5px solid #bbf7d0; cursor: default; }
+
+.jam-info { font-size: .7rem; color: #9ca3af; margin-top: 12px; text-align: center; }
+.jam-info strong { color: #64748b; }
 
 /* LOGBOOK */
 .lb-chip { font-size: .71rem; font-weight: 700; padding: 3px 10px; border-radius: 20px; }
 .lbc-ok  { background: #dcfce7; color: #166534; }
 .lbc-no  { background: #fee2e2; color: #991b1b; }
 .lb-hint { font-size: .8rem; color: #64748b; margin-bottom: 10px; line-height: 1.5; }
-.lb-area {
-  width: 100%; padding: 11px 13px;
-  border: 1.5px solid #e2e8f0; border-radius: 9px;
-  font-size: .85rem; resize: vertical; background: #f8fafc;
-  color: #111827; line-height: 1.6;
-  transition: border-color .15s, box-shadow .15s;
-}
+.lb-area { width: 100%; padding: 11px 13px; border: 1.5px solid #e2e8f0; border-radius: 9px; font-size: .85rem; resize: vertical; background: #f8fafc; color: #111827; line-height: 1.6; transition: border-color .15s, box-shadow .15s; }
 .lb-area:focus { outline: none; border-color: #00529C; box-shadow: 0 0 0 3px rgba(0,82,156,.1); background: #fff; }
 .lb-area:disabled { opacity: .55; cursor: not-allowed; }
-
-.btn-save-lb {
-  width: 100%; margin-top: 11px; padding: 12px;
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  background: #00529C; color: #fff;
-  border: none; border-radius: 9px;
-  font-size: .875rem; font-weight: 700; cursor: pointer;
-  transition: filter .15s;
-}
+.btn-save-lb { width: 100%; margin-top: 11px; padding: 12px; display: flex; align-items: center; justify-content: center; gap: 8px; background: #00529C; color: #fff; border: none; border-radius: 9px; font-size: .875rem; font-weight: 700; cursor: pointer; transition: filter .15s; }
 .btn-save-lb:hover:not(:disabled) { filter: brightness(1.1); }
 .btn-save-lb:disabled { background: #e2e8f0; color: #9ca3af; cursor: not-allowed; }
 .hint-sm { font-size: .72rem; color: #9ca3af; margin-top: 8px; text-align: center; }
 
-/* ============================================================
-   TABLE
-============================================================ */
+/* TABLE */
 .tbl-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .dtbl { width: 100%; border-collapse: collapse; font-size: .84rem; }
-.dtbl th {
-  background: #f8fafc; padding: 9px 13px;
-  text-align: left; color: #64748b;
-  font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
-  border-bottom: 2px solid #e2e8f0; white-space: nowrap;
-}
+.dtbl th { background: #f8fafc; padding: 9px 13px; text-align: left; color: #64748b; font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; border-bottom: 2px solid #e2e8f0; white-space: nowrap; }
 .dtbl td { padding: 11px 13px; border-bottom: 1px solid #f1f5f9; }
 .dtbl tbody tr:last-child td { border-bottom: none; }
 .dtbl tbody tr:hover { background: #f8fafc; }
@@ -991,159 +953,55 @@ button, input, textarea, select { font-family: 'Inter', 'Helvetica Neue', Arial,
 .td-tm   { font-family: 'SF Mono','Monaco',monospace; font-weight: 700; color: #00529C; white-space: nowrap; }
 .td-log  { max-width: 280px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #64748b; }
 .td-empty { text-align: center; padding: 36px; color: #9ca3af; font-size: .85rem; }
-
 .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: .71rem; font-weight: 700; }
 .badge-ok     { background: #dcfce7; color: #166534; }
 .badge-warn   { background: #fef3c7; color: #92400e; }
 .badge-danger { background: #fee2e2; color: #991b1b; }
-
-.btn-dl {
-  display: flex; align-items: center; gap: 6px;
-  padding: 7px 13px; background: #00529C; color: #fff;
-  border: none; border-radius: 8px; font-size: .8rem; font-weight: 600;
-  cursor: pointer; transition: filter .15s;
-}
+.btn-dl { display: flex; align-items: center; gap: 6px; padding: 7px 13px; background: #00529C; color: #fff; border: none; border-radius: 8px; font-size: .8rem; font-weight: 600; cursor: pointer; transition: filter .15s; }
 .btn-dl:hover { filter: brightness(1.1); }
-
-.btn-edit {
-  padding: 4px 11px;
-  border: 1px solid #00529C; color: #00529C;
-  background: transparent; border-radius: 6px;
-  font-size: .72rem; font-weight: 600; cursor: pointer;
-  transition: background .15s, color .15s;
-}
+.btn-edit { padding: 4px 11px; border: 1px solid #00529C; color: #00529C; background: transparent; border-radius: 6px; font-size: .72rem; font-weight: 600; cursor: pointer; transition: background .15s, color .15s; }
 .btn-edit:hover { background: #00529C; color: #fff; }
 
-/* ============================================================
-   MODALS
-============================================================ */
-.modal-bg {
-  position: fixed; inset: 0;
-  background: rgba(15,23,42,.55);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 500; backdrop-filter: blur(6px); padding: 16px;
-}
+/* MODALS */
+.modal-bg { position: fixed; inset: 0; background: rgba(15,23,42,.55); display: flex; align-items: center; justify-content: center; z-index: 500; backdrop-filter: blur(6px); padding: 16px; }
 .modal-bg-dark { background: rgba(5,10,20,.88); }
-
-.modal-box {
-  background: #ffffff;
-  border-radius: 16px;
-  width: 100%; max-width: 420px;
-  box-shadow: 0 24px 48px rgba(0,0,0,.18);
-  overflow: hidden;
-}
-
-/* modal animation */
+.modal-box { background: #ffffff; border-radius: 16px; width: 100%; max-width: 420px; box-shadow: 0 24px 48px rgba(0,0,0,.18); overflow: hidden; }
 .modal-pop-enter-active { animation: modalIn .22s cubic-bezier(.34,1.56,.64,1); }
 .modal-pop-leave-active { animation: modalIn .18s cubic-bezier(.4,0,1,1) reverse; }
 @keyframes modalIn { from { opacity:0; transform:scale(.93) translateY(10px); } to { opacity:1; transform:none; } }
-
-/* REG HEADER */
 .reg-head { text-align: center; padding: 26px 20px 14px; }
-.reg-badge-pill {
-  display: inline-block; padding: 3px 12px;
-  background: #00529C; color: #fff;
-  border-radius: 5px; font-size: .66rem; font-weight: 800; letter-spacing: .1em;
-  margin-bottom: 11px;
-}
+.reg-badge-pill { display: inline-block; padding: 3px 12px; background: #00529C; color: #fff; border-radius: 5px; font-size: .66rem; font-weight: 800; letter-spacing: .1em; margin-bottom: 11px; }
 .reg-h   { font-size: 1.15rem; font-weight: 800; color: #111827; }
 .reg-sub { font-size: .8rem; color: #64748b; margin-top: 5px; line-height: 1.5; }
-
-/* MODAL HEADER */
-.modal-hdr {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 18px 20px 0;
-}
+.modal-hdr { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px 0; }
 .modal-ttl { font-size: .95rem; font-weight: 700; }
-.btn-x {
-  width: 30px; height: 30px; border-radius: 50%;
-  border: none; background: #f0f4f9; color: #64748b;
-  cursor: pointer; display: flex; align-items: center; justify-content: center;
-  transition: background .15s;
-}
+.btn-x { width: 30px; height: 30px; border-radius: 50%; border: none; background: #f0f4f9; color: #64748b; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background .15s; }
 .btn-x:hover { background: #e2e8f0; }
-
 .modal-pad { padding: 12px 20px; }
 .modal-foot { display: flex; gap: 9px; padding: 12px 20px 20px; }
-
-/* FORM */
 .form-body { padding-top: 12px; }
 .fgrp { padding: 0 20px; margin-bottom: 13px; }
 .flbl { display: block; font-size: .72rem; font-weight: 700; color: #64748b; margin-bottom: 5px; }
 .req  { color: #dc2626; }
-.fsel, .finp {
-  width: 100%; padding: 9px 12px;
-  border: 1.5px solid #e2e8f0; border-radius: 8px;
-  font-size: .84rem; color: #111827; background: #f8fafc;
-  outline: none; transition: border-color .15s;
-}
+.fsel, .finp { width: 100%; padding: 9px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: .84rem; color: #111827; background: #f8fafc; outline: none; transition: border-color .15s; }
 .fsel:focus, .finp:focus { border-color: #00529C; box-shadow: 0 0 0 3px rgba(0,82,156,.1); }
 textarea.finp { resize: vertical; line-height: 1.5; }
 .fnote { display: block; font-size: .7rem; color: #9ca3af; margin-top: 4px; }
-
-/* CAMERA */
-.cam-wrap {
-  position: relative;
-  margin: 0 20px 14px;
-  border-radius: 12px; overflow: hidden;
-  aspect-ratio: 4/3;
-  background: #0a0f1a;
-  border: 1.5px solid #e2e8f0;
-}
+.cam-wrap { position: relative; margin: 0 20px 14px; border-radius: 12px; overflow: hidden; aspect-ratio: 4/3; background: #0a0f1a; border: 1.5px solid #e2e8f0; }
 .cam-vid { width: 100%; height: 100%; object-fit: cover; display: block; transform: scaleX(-1); }
-.cam-guide-ring {
-  position: absolute; inset: 0;
-  display: flex; align-items: center; justify-content: center;
-  pointer-events: none;
-}
-.cam-guide-ring::after {
-  content: '';
-  width: 52%; aspect-ratio: 3/4;
-  border: 2px solid rgba(255,255,255,.55);
-  border-radius: 50% 50% 50% 50% / 45% 45% 55% 55%;
-  box-shadow: 0 0 0 9999px rgba(0,0,0,.3);
-}
-
-/* CAPTURE BUTTON */
-.btn-capture {
-  display: flex; align-items: center; justify-content: center; gap: 9px;
-  width: 100%; padding: 13px;
-  background: #00529C; color: #fff;
-  border: none; border-radius: 9px;
-  font-size: .9rem; font-weight: 700; cursor: pointer;
-  transition: filter .15s; margin-bottom: 6px;
-}
+.cam-guide-ring { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.cam-guide-ring::after { content: ''; width: 52%; aspect-ratio: 3/4; border: 2px solid rgba(255,255,255,.55); border-radius: 50% 50% 50% 50% / 45% 45% 55% 55%; box-shadow: 0 0 0 9999px rgba(0,0,0,.3); }
+.btn-capture { display: flex; align-items: center; justify-content: center; gap: 9px; width: 100%; padding: 13px; background: #00529C; color: #fff; border: none; border-radius: 9px; font-size: .9rem; font-weight: 700; cursor: pointer; transition: filter .15s; margin-bottom: 6px; }
 .btn-capture:hover:not(:disabled) { filter: brightness(1.1); }
 .btn-capture:disabled { background: #e2e8f0; color: #9ca3af; cursor: not-allowed; }
-
-.btn-cancel {
-  flex: 1; padding: 12px;
-  background: #f0f4f9; color: #64748b;
-  border: 1px solid #e2e8f0; border-radius: 9px;
-  font-size: .875rem; font-weight: 600; cursor: pointer;
-  transition: background .15s;
-}
+.btn-cancel { flex: 1; padding: 12px; background: #f0f4f9; color: #64748b; border: 1px solid #e2e8f0; border-radius: 9px; font-size: .875rem; font-weight: 600; cursor: pointer; transition: background .15s; }
 .btn-cancel:hover { background: #e2e8f0; }
-
 .note-gray { text-align: center; font-size: .7rem; color: #9ca3af; padding-bottom: 6px; }
-
-/* SPINNER */
-.mini-spin {
-  display: inline-block; width: 15px; height: 15px; flex-shrink: 0;
-  border: 2.5px solid rgba(255,255,255,.3); border-top-color: #fff;
-  border-radius: 50%; animation: mspin .7s linear infinite;
-}
+.mini-spin { display: inline-block; width: 15px; height: 15px; flex-shrink: 0; border: 2.5px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: mspin .7s linear infinite; }
 @keyframes mspin { to { transform: rotate(360deg); } }
 
-/* ============================================================
-   RESPONSIVE
-============================================================ */
-@media (max-width: 1024px) {
-  .page-wrap { padding: 16px; }
-  .card { padding: 18px; }
-  .topbar { padding: 0 16px; }
-}
-
+/* RESPONSIVE */
+@media (max-width: 1024px) { .page-wrap { padding: 16px; } .card { padding: 18px; } .topbar { padding: 0 16px; } }
 @media (max-width: 640px) {
   .page-wrap { padding: 12px; }
   .card { padding: 14px; }
